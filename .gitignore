@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local data and generated artifacts
+data/
+batch_eval_results/
+runs/
+sam2_tracks/
+tmp/
+
+# Third-party code and large model checkpoints
+repo/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Videos and masks
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# LaTeX build outputs
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
