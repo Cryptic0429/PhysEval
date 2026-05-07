@@ -27,7 +27,9 @@ them locally with:
 bash scripts/setup_sam2_assets.sh
 ```
 
-By default this script:
+For SAM2, the pipeline needs both the SAM2 source checkout and a model
+checkpoint. The model config is not a separate download: it is provided by the
+SAM2 repository under `configs/sam2.1/`. By default this script:
 
 - clones `https://github.com/facebookresearch/sam2.git` into `repo/sam2/`;
 - downloads `sam2.1_hiera_base_plus.pt` into `repo/sam2/checkpoints/`;
@@ -51,6 +53,19 @@ pipeline falls back to motion-based initialization when YOLO is unavailable or
 does not find a suitable object. If `yolov8n.pt` exists in the repository root,
 `scripts/run_batch_simple.py` uses it automatically; otherwise you can pass an
 explicit detector weight path with `--yolo-weights`.
+
+If you use a non-default SAM2 size, pass the matching config and checkpoint to
+the batch command. For example, `--sam2-model large` corresponds to:
+
+```bash
+python scripts/run_batch_simple.py \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --video-root data/t2v_videos/model_name \
+  --output-dir batch_eval_results/model_name \
+  --detector yolo_then_motion \
+  --model-cfg configs/sam2.1/sam2.1_hiera_l.yaml \
+  --model-weights repo/sam2/checkpoints/sam2.1_hiera_large.pt
+```
 
 ## Typical Workflow
 

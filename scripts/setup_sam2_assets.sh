@@ -101,15 +101,19 @@ download_file() {
 case "$SAM2_MODEL" in
   tiny)
     SAM2_CKPT="sam2.1_hiera_tiny.pt"
+    SAM2_CFG="configs/sam2.1/sam2.1_hiera_t.yaml"
     ;;
   small)
     SAM2_CKPT="sam2.1_hiera_small.pt"
+    SAM2_CFG="configs/sam2.1/sam2.1_hiera_s.yaml"
     ;;
   base_plus|base-plus|b+)
     SAM2_CKPT="sam2.1_hiera_base_plus.pt"
+    SAM2_CFG="configs/sam2.1/sam2.1_hiera_b+.yaml"
     ;;
   large)
     SAM2_CKPT="sam2.1_hiera_large.pt"
+    SAM2_CFG="configs/sam2.1/sam2.1_hiera_l.yaml"
     ;;
   *)
     echo "Unsupported SAM2_MODEL: $SAM2_MODEL" >&2
@@ -147,6 +151,7 @@ Done.
 
 Expected paths:
   SAM2 repo:       ${SAM2_REPO_DIR}
+  SAM2 config:     ${SAM2_CFG}
   SAM2 checkpoint: ${SAM2_REPO_DIR}/checkpoints/${SAM2_CKPT}
   YOLO weights:    ${ROOT_DIR}/${YOLO_WEIGHTS}
 
@@ -155,5 +160,7 @@ Default batch command:
     --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \\
     --video-root data/t2v_videos/<model_name> \\
     --output-dir batch_eval_results/<model_name> \\
-    --detector yolo_then_motion
+    --detector yolo_then_motion \\
+    --model-cfg ${SAM2_CFG} \\
+    --model-weights ${SAM2_REPO_DIR}/checkpoints/${SAM2_CKPT}
 EOF
