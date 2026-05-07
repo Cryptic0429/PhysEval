@@ -1,0 +1,15 @@
+﻿Field,Meaning
+Index,Global row index; matches the Markdown prompt table row.
+Prompt_ID,Simplified prompt ID; also recommended video filename prefix.
+Video_File,Expected generated video filename.
+Tracking_JSON,Expected SAM2 tracking JSON path.
+Module,B1.1/B1.2/B2/B3.1...
+Metric,Physical metric used by dispatcher.
+Evaluator,Which evaluator script/function to call.
+Measurement_Method,Specific measurement method inside evaluator.
+Tracking_Objects,SAM2 object centers/masks to read from JSON.
+Scale_Mode,standard_object / explicit_object_size / object_diameter / ratio_only / none.
+Calibration_Object,Object or structure used for metric scale; blank/none if not needed.
+Calibration_Value_m,Real calibration length in meters; blank for ratio-only or none.
+Target_Type / Target_Value / Target_Unit,Target to compare measured result against.
+Known_Parameters_JSON,"Compact evaluator-only metadata such as mass, liquid density, or collision type."

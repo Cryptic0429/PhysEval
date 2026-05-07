@@ -1,0 +1,5 @@
+﻿Source Markdown,t2v_physics_50_per_indicator_prompts_v2_earth_b2.md
+Converted Rows,500
+Matching Key,Use Index and Prompt_ID to match this prompt table with the metadata Excel.
+Sheets,All_Prompts contains every prompt; Summary lists prompt counts by module.
+Prompt Columns,English_Prompt is retained; Chinese_Module and Chinese_Prompt columns have been removed.
