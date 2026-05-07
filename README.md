@@ -20,8 +20,18 @@ Large or machine-specific assets are intentionally not included:
 ## Prepare SAM2 and YOLO Assets
 
 The repository includes our SAM2 and YOLO integration code, but it does not
-commit third-party repositories, model checkpoints, or detector weights. Prepare
-them locally with:
+commit third-party repositories, model checkpoints, or detector weights.
+
+Install the Python dependencies first. On a GPU server, make sure
+`torch`/`torchvision` match the CUDA runtime of that machine; if you already have
+a working PyTorch environment, keep it and install the remaining packages into
+that environment.
+
+```bash
+pip install -r requirements.txt
+```
+
+Then prepare the external assets locally with:
 
 ```bash
 bash scripts/setup_sam2_assets.sh
@@ -46,6 +56,12 @@ bash scripts/setup_sam2_assets.sh --install-sam2
 
 # Skip YOLO if you only want motion-based initialization.
 bash scripts/setup_sam2_assets.sh --skip-yolo
+```
+
+If you do not use `--install-sam2`, install SAM2 after cloning:
+
+```bash
+pip install -e repo/sam2
 ```
 
 The default batch detector is `yolo_then_motion`: YOLO is tried first and the
