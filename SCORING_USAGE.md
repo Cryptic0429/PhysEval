@@ -212,7 +212,7 @@ The evaluator status adjusts the score:
 
 ```text
 valid       multiplier 1.0
-weak_valid  multiplier 0.7
+weak_valid  multiplier 0.8
 invalid     multiplier 0.0
 failed      multiplier 0.0
 ```
@@ -403,10 +403,10 @@ effective_for_score = true
 Example 2: weak valid video with moderately unstable mask:
 
 ```text
-status = weak_valid             -> 0.7
+status = weak_valid             -> 0.8
 tracking_quality_status = pass  -> 1.0
 mask_quality_score = 0.6
-adjusted_score = 71.65 * 0.7 * 1.0 * 0.6 = 30.09
+adjusted_score = 71.65 * 0.8 * 1.0 * 0.6 = 34.39
 effective_for_score = true
 ```
 

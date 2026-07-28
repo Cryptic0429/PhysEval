@@ -16,11 +16,18 @@ repo/
 *.ckpt
 *.safetensors
 
-# Videos and masks
+# Generated videos and masks are ignored by default. The released benchmark
+# videos under video/ are explicitly re-included below and tracked with Git LFS.
 *.mp4
 *.mov
 *.avi
 *.mkv
+!video/
+!video/**/*.mp4
+!video/**/*.mov
+!video/**/*.avi
+!video/**/*.mkv
+video/*.zip
 
 # LaTeX build outputs
 *.aux

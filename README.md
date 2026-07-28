@@ -1,6 +1,6 @@
 # PhysEval
 
-Physics-oriented evaluation tools for text-to-video generation.
+Physics-oriented evaluation tools and benchmark videos for text-to-video generation.
 
 This repository contains the reusable parts of the PhysT2V-Bench workspace:
 
@@ -10,9 +10,18 @@ This repository contains the reusable parts of the PhysT2V-Bench workspace:
 - `BATCH_USAGE.md`: how to run video tracking and physics evaluation in batch.
 - `SCORING_USAGE.md`: scoring formula, validity rules, and output files.
 
-Large or machine-specific assets are intentionally not included:
+The released benchmark videos are available under `video/<model_name>/` and are
+tracked with Git LFS. Clone with LFS enabled before running an evaluation:
 
-- generated videos under `data/t2v_videos/`
+```bash
+git lfs install
+git clone <repository-url>
+cd PhysEval
+git lfs pull
+```
+
+Large or machine-specific assets other than the released videos are intentionally not included:
+
 - metadata spreadsheets under `data/metadata/`
 - SAM2 source checkout and checkpoints under `repo/sam2/`
 - batch outputs, temporary renders, and cache files
@@ -104,7 +113,9 @@ Score one model:
 ```bash
 python scripts/score_results.py \
   --result-root batch_eval_results/model_name \
-  --model-name model_name
+  --model-name model_name \
+  --weak-valid-multiplier 0.8
 ```
 
+The default `weak_valid` multiplier is **0.8**, matching the paper protocol.
 See `BATCH_USAGE.md` and `SCORING_USAGE.md` for detailed options.
