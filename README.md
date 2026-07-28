@@ -12,7 +12,8 @@ This repository contains the reusable parts of the PhysT2V-Bench workspace:
 
 Large or machine-specific assets are intentionally not included:
 
-- generated videos under `data/t2v_videos/`
+- generated videos, which are released separately in
+  [`physeval_video`](https://github.com/Cryptic0429/physeval_video)
 - metadata spreadsheets under `data/metadata/`
 - SAM2 source checkout and checkpoints under `repo/sam2/`
 - batch outputs, temporary renders, and cache files
@@ -104,7 +105,9 @@ Score one model:
 ```bash
 python scripts/score_results.py \
   --result-root batch_eval_results/model_name \
-  --model-name model_name
+  --model-name model_name \
+  --weak-valid-multiplier 0.8
 ```
 
+The default `weak_valid` multiplier is **0.8**, matching the paper protocol.
 See `BATCH_USAGE.md` and `SCORING_USAGE.md` for detailed options.

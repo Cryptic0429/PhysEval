@@ -44,7 +44,7 @@ DEFAULT_TOLERANCES = {
 
 STATUS_MULTIPLIERS = {
     "valid": 1.0,
-    "weak_valid": 0.7,
+    "weak_valid": 0.8,
     "invalid": 0.0,
     "failed": 0.0,
 }
@@ -89,8 +89,8 @@ def parse_args() -> argparse.Namespace:
                         help="Optional JSON object mapping metric names to tau values")
     parser.add_argument("--penalty-multiplier", type=float, default=None,
                         help="Convenience multiplier for weak_valid; also used by legacy --mask-policy penalty")
-    parser.add_argument("--weak-valid-multiplier", type=float, default=0.7,
-                        help="Multiplier for physics status weak_valid. Default: 0.7")
+    parser.add_argument("--weak-valid-multiplier", type=float, default=0.8,
+                        help="Multiplier for physics status weak_valid. Default: 0.8 (paper protocol)")
     parser.add_argument("--mask-policy", choices=["continuous", "penalty", "hard_fail", "ignore"], default="continuous",
                         help="How to handle mask-QC. Default: continuous 0-1 mask quality score")
     parser.add_argument("--qc-flag-multiplier", type=float, default=0.7,
