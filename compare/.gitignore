@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp*/
+
+# Local videos, model repositories, checkpoints, frame caches, and outputs
+video/*
+!video/README.md
+repo/*
+!repo/README.md
+outputs/*
+!outputs/.gitkeep
+cache/
+*.pt
+*.pth
+*.ckpt

@@ -18,12 +18,19 @@ if str(WORKSPACE_ROOT) not in sys.path:
 import pandas as pd
 
 from physics_eval.run_batch_eval import filter_metadata, process_row
-from physics_eval.utils.io import failure_result, read_metadata, row_to_dict, write_results
+from physics_eval.utils.io import failure_result, parse_known_params, read_metadata, row_to_dict, write_results
 from physics_eval.utils.tracking import normalize_tracking_json
+from physics_eval.utils.tracking_init import (
+    PromptSpec,
+    normalize_init_mode,
+    normalize_manual_prompts,
+    parse_json_value,
+    renderer_gt_eligibility,
+    renderer_gt_prompts,
+)
 from physics_eval.utils.tracking_quality import write_tracking_quality
+from physics_eval.quality.diagnostics import analyze_series, load_series_from_json
 from scripts.quality.check_mask_area_stability import (
-    analyze_series,
-    load_series_from_json,
     save_plot,
     write_csv,
 )
@@ -53,11 +60,14 @@ def parse_args() -> argparse.Namespace:
                         help="SAM2 model cfg")
     parser.add_argument("--model-weights", default=None,
                         help="Default: <sam2-repo>/checkpoints/sam2.1_hiera_base_plus.pt")
+    parser.add_argument("--sam2-precision", default="auto", choices=["auto", "fp32", "fp16", "bf16"],
+                        help="SAM2 inference precision passed to the tracker. Default: auto")
 
     parser.add_argument("--index", type=int, default=None, help="Only process a single Index")
     parser.add_argument("--prompt-id", default=None, help="Only process a single Prompt_ID")
     parser.add_argument("--fps", type=float, default=None, help="Fallback fps for evaluation if tracking JSON has no fps/time")
     parser.add_argument("--strict", action="store_true", help="Mark weak/invalid quality as invalid")
+    parser.add_argument("--spring-period-protocol", choices=["legacy_v1", "period_confidence_v3_candidate"], default="legacy_v1")
 
     parser.add_argument("--skip-tracking-if-exists", action="store_true", help="Reuse output tracking JSON if already present")
     parser.add_argument("--tracking-only", action="store_true", help="Only run tracking, do not run physics evaluation")
@@ -67,6 +77,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-mask-png", action="store_true", help="Save SAM2 mask PNGs")
     parser.add_argument("--save-auto-init-debug", action="store_true", help="Save image showing the selected auto-init prompt")
     parser.add_argument("--copy-video-to-workspace", action="store_true")
+    parser.add_argument(
+        "--offload-video-to-cpu",
+        action="store_true",
+        help="Keep decoded SAM2 video frames on CPU; useful for very long clips.",
+    )
     parser.add_argument("--debug", action="store_true",
                         help="Shortcut: save vis video, masks, auto-init debug image, diagnostics, and area plots")
 
@@ -95,6 +110,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-auto-init-box", action="store_true")
     parser.add_argument("--no-bidirectional-propagation", action="store_true",
                         help="Only propagate forward from the selected init frame.")
+    parser.add_argument(
+        "--allow-renderer-gt-init",
+        action="store_true",
+        help=(
+            "Allow rows with Tracking_Init_Mode=renderer_gt to derive one point/box from a "
+            "predeclared first-visible or first-eligible renderer mask. Required explicitly to "
+            "prevent accidental GT-assisted evaluation."
+        ),
+    )
 
     parser.add_argument("--area-stability-check", action="store_true",
                         help="After tracking, check middle-window mask area stability before evaluation")
@@ -143,7 +167,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--python-executable", default=sys.executable, help="Python executable used to run SAM2 tracking")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.strict and args.spring_period_protocol == "period_confidence_v3_candidate":
+        parser.error("--strict conflicts with the eligibility-preserving spring protocol")
+    return args
 
 
 def default_model_weights(sam2_repo: Path) -> Path:
@@ -169,23 +196,37 @@ def default_metadata_path(workspace_root: Path) -> Path | None:
     return files[0] if len(files) == 1 else None
 
 
+def resolve_cli_path(raw: str | Path, workspace_root: Path) -> Path:
+    """Resolve user-facing relative paths against the repository, not the shell CWD."""
+    path = Path(raw).expanduser()
+    return path.resolve() if path.is_absolute() else (workspace_root / path).resolve()
+
+
 def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     workspace_root = Path(args.workspace_root).expanduser().resolve() if args.workspace_root else WORKSPACE_ROOT.resolve()
-    sam2_repo = Path(args.sam2_repo).expanduser().resolve() if args.sam2_repo else workspace_root / "repo" / "sam2"
+    sam2_repo = resolve_cli_path(args.sam2_repo, workspace_root) if args.sam2_repo else workspace_root / "repo" / "sam2"
 
     args.workspace_root = str(workspace_root)
     if not args.metadata:
         auto_metadata = default_metadata_path(workspace_root)
         if auto_metadata is not None:
             args.metadata = str(auto_metadata)
-    args.video_root = str(Path(args.video_root).expanduser().resolve()) if args.video_root else str(workspace_root / "data" / "t2v_videos")
-    args.output_dir = str(Path(args.output_dir).expanduser().resolve()) if args.output_dir else str(workspace_root / "batch_eval_results")
+    elif args.metadata:
+        args.metadata = str(resolve_cli_path(args.metadata, workspace_root))
+    args.video_root = str(resolve_cli_path(args.video_root, workspace_root)) if args.video_root else str(workspace_root / "data" / "t2v_videos")
+    args.output_dir = str(resolve_cli_path(args.output_dir, workspace_root)) if args.output_dir else str(workspace_root / "batch_eval_results")
     args.sam2_repo = str(sam2_repo)
     args.model_weights = (
-        str(Path(args.model_weights).expanduser().resolve())
+        str(resolve_cli_path(args.model_weights, workspace_root))
         if args.model_weights
         else str(default_model_weights(sam2_repo))
     )
+    if args.sam2_script:
+        args.sam2_script = str(resolve_cli_path(args.sam2_script, workspace_root))
+    if args.yolo_weights:
+        args.yolo_weights = str(resolve_cli_path(args.yolo_weights, workspace_root))
+    if args.area_stability_output_dir:
+        args.area_stability_output_dir = str(resolve_cli_path(args.area_stability_output_dir, workspace_root))
 
     if args.debug:
         args.save_vis_video = True
@@ -253,16 +294,255 @@ def per_video_output_dir(output_dir: Path, row: dict[str, Any], layout: str) -> 
 
 
 def num_objects_for_row(row: dict[str, Any]) -> int:
+    for key in ("_Resolved_Tracking_Num_Objects", "Tracking_Num_Objects", "Num_Objects"):
+        try:
+            value = row.get(key)
+            if value is not None and value != "":
+                return max(1, int(value))
+        except (TypeError, ValueError):
+            continue
+    return 1
+
+
+_TRACKING_OVERRIDE_ALIASES = {
+    "auto_init_num_objects": "num_objects",
+    "tracking_num_objects": "num_objects",
+    "auto_init_detector": "detector",
+    "scan_frames": "auto_init_scan_frames",
+    "scan_mode": "auto_init_scan_mode",
+    "threshold": "auto_init_threshold",
+    "min_area": "auto_init_min_area",
+    "max_area_ratio": "auto_init_max_area_ratio",
+    "min_fill_ratio": "auto_init_min_fill_ratio",
+    "max_aspect_ratio": "auto_init_max_aspect_ratio",
+    "object_refine": "auto_init_object_refine",
+    "box_expand": "auto_init_box_expand",
+    "target_hint": "auto_init_target_hint",
+    "shadow_filter_disabled": "disable_auto_init_shadow_filter",
+    "negative_points_disabled": "no_auto_init_negative_points",
+    "box_disabled": "no_auto_init_box",
+    "bidirectional_propagation_disabled": "no_bidirectional_propagation",
+}
+
+_TRACKING_OVERRIDE_KEYS = {
+    "num_objects",
+    "detector",
+    "yolo_conf",
+    "yolo_iou",
+    "yolo_classes",
+    "auto_init_scan_frames",
+    "auto_init_scan_mode",
+    "auto_init_threshold",
+    "auto_init_min_area",
+    "auto_init_max_area_ratio",
+    "auto_init_min_fill_ratio",
+    "auto_init_max_aspect_ratio",
+    "auto_init_object_refine",
+    "auto_init_box_expand",
+    "auto_init_target_hint",
+    "disable_auto_init_shadow_filter",
+    "no_auto_init_negative_points",
+    "no_auto_init_box",
+    "no_bidirectional_propagation",
+    "offload_video_to_cpu",
+}
+
+
+def _bool_setting(value: Any, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    raise ValueError(f"{label} must be a boolean")
+
+
+def _finite_setting(value: Any, label: str) -> float:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{label} must be a finite number")
     try:
-        return max(1, int(row.get("Num_Objects") or 1))
-    except (TypeError, ValueError):
-        return 1
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a finite number") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{label} must be a finite number")
+    return parsed
+
+
+def tracking_overrides_for_row(row: dict[str, Any]) -> dict[str, Any]:
+    params = parse_known_params(row)
+    raw = row.get("Tracking_Overrides_JSON")
+    if raw is None or raw == "":
+        raw = params.get("tracking_overrides", {})
+    parsed = parse_json_value(raw, "Tracking_Overrides_JSON") or {}
+    if not isinstance(parsed, dict):
+        raise ValueError("Tracking_Overrides_JSON must decode to an object")
+
+    normalized: dict[str, Any] = {}
+    for raw_key, value in parsed.items():
+        key = _TRACKING_OVERRIDE_ALIASES.get(str(raw_key), str(raw_key))
+        if key not in _TRACKING_OVERRIDE_KEYS:
+            raise ValueError(
+                f"unsupported Tracking_Overrides_JSON key {raw_key!r}; "
+                f"allowed keys are {sorted(_TRACKING_OVERRIDE_KEYS)}"
+            )
+        if key in normalized:
+            raise ValueError(f"duplicate tracking override after alias normalization: {key}")
+        normalized[key] = value
+
+    if "num_objects" in normalized:
+        value = _finite_setting(normalized["num_objects"], "tracking override num_objects")
+        if value < 1 or not value.is_integer():
+            raise ValueError("tracking override num_objects must be a positive integer")
+        normalized["num_objects"] = int(value)
+    if "detector" in normalized and normalized["detector"] not in {"motion", "yolo", "yolo_then_motion"}:
+        raise ValueError("tracking override detector must be motion, yolo, or yolo_then_motion")
+    if "auto_init_scan_mode" in normalized and normalized["auto_init_scan_mode"] not in {"start", "middle", "uniform"}:
+        raise ValueError("tracking override auto_init_scan_mode must be start, middle, or uniform")
+    for key in ("auto_init_scan_frames", "auto_init_min_area"):
+        if key in normalized:
+            value = _finite_setting(normalized[key], f"tracking override {key}")
+            if value < 1 or not value.is_integer():
+                raise ValueError(f"tracking override {key} must be a positive integer")
+            normalized[key] = int(value)
+    for key in ("yolo_conf", "yolo_iou", "auto_init_max_area_ratio", "auto_init_min_fill_ratio"):
+        if key in normalized:
+            value = _finite_setting(normalized[key], f"tracking override {key}")
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"tracking override {key} must be in [0, 1]")
+            normalized[key] = value
+    for key in ("auto_init_threshold", "auto_init_max_aspect_ratio", "auto_init_box_expand"):
+        if key in normalized:
+            value = _finite_setting(normalized[key], f"tracking override {key}")
+            if value <= 0.0:
+                raise ValueError(f"tracking override {key} must be > 0")
+            normalized[key] = value
+    for key in (
+        "auto_init_object_refine",
+        "disable_auto_init_shadow_filter",
+        "no_auto_init_negative_points",
+        "no_auto_init_box",
+        "no_bidirectional_propagation",
+        "offload_video_to_cpu",
+    ):
+        if key in normalized:
+            normalized[key] = _bool_setting(normalized[key], f"tracking override {key}")
+    for key in ("yolo_classes", "auto_init_target_hint"):
+        if key in normalized and normalized[key] is not None and not isinstance(normalized[key], str):
+            raise ValueError(f"tracking override {key} must be a string or null")
+    return normalized
+
+
+def effective_tracking_settings(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    settings = {
+        key: getattr(args, key, False) if key == "offload_video_to_cpu" else getattr(args, key)
+        for key in _TRACKING_OVERRIDE_KEYS
+        if key != "num_objects"
+    }
+    settings["num_objects"] = num_objects_for_row(row)
+    settings.update(tracking_overrides_for_row(row))
+    return settings
+
+
+def resolve_tracking_initialization(
+    row: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], list[PromptSpec]]:
+    params = parse_known_params(row)
+    nested = params.get("tracking_init", {})
+    if nested is None:
+        nested = {}
+    if not isinstance(nested, dict):
+        raise ValueError("Known_Parameters_JSON.tracking_init must be an object")
+    mode_raw = row.get("Tracking_Init_Mode")
+    if mode_raw is None or mode_raw == "":
+        mode_raw = nested.get("mode", "auto")
+    mode = normalize_init_mode(mode_raw)
+    settings = effective_tracking_settings(row, args)
+    expected_objects = int(settings["num_objects"])
+
+    prompts: list[PromptSpec] = []
+    if mode == "manual":
+        raw_prompts = row.get("Tracking_Prompts_JSON")
+        if raw_prompts is None or raw_prompts == "":
+            raw_prompts = nested.get("prompts")
+        prompts = normalize_manual_prompts(raw_prompts, expected_objects)
+    elif mode == "renderer_gt":
+        if not args.allow_renderer_gt_init:
+            raise ValueError(
+                "renderer_gt initialization is GT-assisted and requires --allow-renderer-gt-init"
+            )
+        prompts = renderer_gt_prompts(row, nested)
+        if len(prompts) != expected_objects:
+            raise ValueError(
+                f"renderer_gt initialization resolved {len(prompts)} prompt(s), "
+                f"but the row expects {expected_objects} object(s)"
+            )
+
+    if prompts:
+        box_presence = [item.box is not None for item in prompts]
+        if any(box_presence) and not all(box_presence):
+            raise ValueError(
+                "all metadata prompts in a row must consistently provide boxes or omit boxes; "
+                "the SAM2 prompt adapter applies one prompt policy per run"
+            )
+
+    boxes_used = bool(prompts) and all(item.box is not None for item in prompts) and not settings["no_auto_init_box"]
+    if mode == "auto":
+        protocol = "video_only_auto"
+    elif mode == "manual":
+        protocol = "one_frame_manual_point_box" if boxes_used else "one_frame_manual_point"
+    else:
+        eligibility = renderer_gt_eligibility(nested)
+        selector = (
+            "first_visible"
+            if eligibility == renderer_gt_eligibility()
+            else "first_eligible"
+        )
+        protocol = f"renderer_{selector}_gt_point_box" if boxes_used else f"renderer_{selector}_gt_point"
+    provenance = {
+        "schema_version": 1,
+        "mode": mode,
+        "protocol": protocol,
+        "num_objects": expected_objects,
+        "prompts": [item.to_dict() for item in prompts],
+        "tracking_overrides": tracking_overrides_for_row(row),
+        "uses_renderer_ground_truth": mode == "renderer_gt",
+        "uses_ground_truth_after_initialization": False,
+        "box_prompts_used": boxes_used,
+        "renderer_gt_eligibility": renderer_gt_eligibility(nested) if mode == "renderer_gt" else None,
+        "semantic_verification": {
+            "status": "declared",
+            "target_description": row.get("Tracking_Objects") or row.get("Calibration_Object"),
+            "expected_object_count": expected_objects,
+            "resolved_prompt_count": len(prompts) if mode != "auto" else None,
+            "prompt_count_matches_expected": len(prompts) == expected_objects if mode != "auto" else None,
+            "initialization_supervision": protocol,
+            "future_frame_gt_used_for_initialization": False,
+        },
+    }
+    return {**settings, "initialization": provenance}, prompts
 
 
 def output_tracking_json(output_dir: Path, row: dict[str, Any], layout: str = "organized") -> Path:
     if layout == "flat":
         return output_dir / "tracking_json" / f"{scene_name_for_row(row)}.json"
     return per_video_output_dir(output_dir, row, layout) / "tracking_points.json"
+
+
+def _embed_initialization_provenance(path: Path, provenance: dict[str, Any]) -> None:
+    if not path.is_file():
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["batch_initialization"] = provenance
+    if path.name == "run_config.json":
+        payload["semantic_verification"] = provenance.get("semantic_verification")
+    path.write_text(json.dumps(json_safe(payload), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def run_tracking_for_row(
@@ -283,10 +563,15 @@ def run_tracking_for_row(
         raise FileNotFoundError(f"SAM2 tracking script not found: {sam2_script}")
 
     scene = scene_name_for_row(row)
-    num_objects = num_objects_for_row(row)
-    cmd = [
-        str(Path(args.python_executable).expanduser()),
-        str(sam2_script),
+    settings, prompts = resolve_tracking_initialization(row, args)
+    provenance = settings["initialization"]
+    num_objects = int(settings["num_objects"])
+    row["_Resolved_Tracking_Num_Objects"] = num_objects
+    row["Resolved_Tracking_Initialization_JSON"] = json.dumps(
+        provenance, ensure_ascii=False, sort_keys=True
+    )
+
+    tracker_args = [
         "--workspace-root",
         str(workspace_root),
         "--scene-name",
@@ -299,69 +584,106 @@ def run_tracking_for_row(
         args.model_cfg,
         "--model-weights",
         str(Path(args.model_weights).expanduser()),
-        "--auto-init",
-        "--auto-init-num-objects",
-        str(num_objects),
+        "--precision",
+        args.sam2_precision,
         "--auto-init-scan-frames",
-        str(args.auto_init_scan_frames),
+        str(settings["auto_init_scan_frames"]),
         "--auto-init-scan-mode",
-        args.auto_init_scan_mode,
-        "--auto-init-detector",
-        args.detector,
+        str(settings["auto_init_scan_mode"]),
         "--yolo-conf",
-        str(args.yolo_conf),
+        str(settings["yolo_conf"]),
         "--yolo-iou",
-        str(args.yolo_iou),
+        str(settings["yolo_iou"]),
         "--auto-init-threshold",
-        str(args.auto_init_threshold),
+        str(settings["auto_init_threshold"]),
         "--auto-init-min-area",
-        str(args.auto_init_min_area),
+        str(settings["auto_init_min_area"]),
         "--auto-init-max-area-ratio",
-        str(args.auto_init_max_area_ratio),
+        str(settings["auto_init_max_area_ratio"]),
         "--auto-init-min-fill-ratio",
-        str(args.auto_init_min_fill_ratio),
+        str(settings["auto_init_min_fill_ratio"]),
         "--auto-init-max-aspect-ratio",
-        str(args.auto_init_max_aspect_ratio),
+        str(settings["auto_init_max_aspect_ratio"]),
         "--auto-init-box-expand",
-        str(args.auto_init_box_expand),
+        str(settings["auto_init_box_expand"]),
         "--auto-init-target-hint",
-        str(row.get("Calibration_Object") if args.auto_init_target_hint == "metadata" else args.auto_init_target_hint),
+        str(
+            row.get("Calibration_Object")
+            if settings["auto_init_target_hint"] == "metadata"
+            else settings["auto_init_target_hint"]
+        ),
         "--overwrite-frames",
         "--overwrite-outputs",
     ]
-    if not args.auto_init_object_refine:
-        cmd.append("--no-auto-init-object-refine")
+    if not settings["auto_init_object_refine"]:
+        tracker_args.append("--no-auto-init-object-refine")
     if args.yolo_weights:
-        cmd.extend(["--yolo-weights", str(Path(args.yolo_weights).expanduser())])
-    if args.yolo_classes:
-        cmd.extend(["--yolo-classes", str(args.yolo_classes)])
-    if args.no_auto_init_box:
-        cmd.append("--no-auto-init-box")
-    if args.disable_auto_init_shadow_filter:
-        cmd.append("--disable-auto-init-shadow-filter")
-    if args.no_auto_init_negative_points:
-        cmd.append("--no-auto-init-negative-points")
-    if args.no_bidirectional_propagation:
-        cmd.append("--no-bidirectional-propagation")
+        tracker_args.extend(["--yolo-weights", str(Path(args.yolo_weights).expanduser())])
+    if settings["yolo_classes"]:
+        tracker_args.extend(["--yolo-classes", str(settings["yolo_classes"])])
+    if settings["no_auto_init_box"]:
+        tracker_args.append("--no-auto-init-box")
+    if settings["disable_auto_init_shadow_filter"]:
+        tracker_args.append("--disable-auto-init-shadow-filter")
+    if settings["no_auto_init_negative_points"]:
+        tracker_args.append("--no-auto-init-negative-points")
+    if settings["no_bidirectional_propagation"]:
+        tracker_args.append("--no-bidirectional-propagation")
+    if settings["offload_video_to_cpu"]:
+        tracker_args.append("--offload-video-to-cpu")
     if args.save_vis_video:
-        cmd.append("--save-vis-video")
+        tracker_args.append("--save-vis-video")
     if args.save_mask_png:
-        cmd.append("--save-mask-png")
+        tracker_args.append("--save-mask-png")
     if args.save_auto_init_debug:
-        cmd.append("--save-auto-init-debug")
+        tracker_args.append("--save-auto-init-debug")
     if args.copy_video_to_workspace:
-        cmd.append("--copy-video-to-workspace")
+        tracker_args.append("--copy-video-to-workspace")
+
+    source_dir = workspace_root / "sam2_tracks" / scene
+    prompt_manifest: Path | None = None
+    if prompts:
+        source_dir.mkdir(parents=True, exist_ok=True)
+        prompt_manifest = source_dir / "resolved_init_prompts.json"
+        prompt_manifest.write_text(
+            json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        adapter_script = workspace_root / "scripts" / "sam2" / "run_sam2_track_prompts.py"
+        if not adapter_script.is_file():
+            raise FileNotFoundError(f"metadata prompt adapter not found: {adapter_script}")
+        cmd = [
+            str(Path(args.python_executable).expanduser()),
+            str(adapter_script),
+            "--prompt-manifest",
+            str(prompt_manifest),
+            "--base-script",
+            str(sam2_script),
+            "--",
+            *tracker_args,
+        ]
+    else:
+        cmd = [
+            str(Path(args.python_executable).expanduser()),
+            str(sam2_script),
+            *tracker_args,
+            "--auto-init",
+            "--auto-init-num-objects",
+            str(num_objects),
+            "--auto-init-detector",
+            str(settings["detector"]),
+        ]
 
     LOGGER.info("tracking Index=%s Prompt_ID=%s video=%s", row.get("Index"), row.get("Prompt_ID"), video_path)
     proc = subprocess.run(cmd, cwd=str(workspace_root), text=True, capture_output=True)
     if proc.returncode != 0:
         return None, proc.stderr.strip() or proc.stdout.strip() or f"SAM2 exited with code {proc.returncode}"
 
-    source_json = workspace_root / "sam2_tracks" / scene / "tracking_points.json"
+    source_json = source_dir / "tracking_points.json"
     if not source_json.exists():
         return None, f"SAM2 completed but tracking JSON was not found: {source_json}"
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    _embed_initialization_provenance(source_json, provenance)
     shutil.copy2(source_json, out_json)
     write_tracking_quality(
         path=out_json,
@@ -370,9 +692,21 @@ def run_tracking_for_row(
         min_object_coverage=args.min_object_coverage,
     )
 
-    run_config = workspace_root / "sam2_tracks" / scene / "run_config.json"
+    run_config = source_dir / "run_config.json"
     if run_config.exists():
+        _embed_initialization_provenance(run_config, provenance)
         shutil.copy2(run_config, out_json.with_name("run_config.json"))
+    # Keep the high-value review artifacts beside the organized result.  Masks
+    # remain in sam2_tracks/<scene>/masks to avoid duplicating hundreds of PNGs.
+    for source_name, output_name in (
+        ("tracking_vis.mp4", "tracking_vis.mp4"),
+        ("auto_init_debug.jpg", "auto_init_debug.jpg"),
+    ):
+        source_path = source_dir / source_name
+        if source_path.exists():
+            shutil.copy2(source_path, out_json.with_name(output_name))
+    if prompt_manifest is not None and prompt_manifest.exists():
+        shutil.copy2(prompt_manifest, out_json.with_name("resolved_init_prompts.json"))
     return out_json.resolve(), None
 
 
@@ -481,7 +815,11 @@ def check_area_stability_for_row(
         if not isinstance(quality_checks, dict):
             quality_checks = {}
         quality_checks["mask_qc"] = {
-            "status": "pass" if all(item.get("decision") == "keep" for item in summaries) else "flagged",
+            "status": (
+                "not_evaluated"
+                if not summaries
+                else "pass" if all(item.get("decision") == "keep" for item in summaries) else "flagged"
+            ),
             "objects": summaries,
             "report_json": str(report_json),
         }
@@ -490,7 +828,7 @@ def check_area_stability_for_row(
     except Exception as exc:
         LOGGER.warning("failed to embed mask QC into tracking JSON %s: %s", tracking_json, exc)
 
-    passed = all(item.get("decision") == "keep" for item in summaries)
+    passed = bool(summaries) and all(item.get("decision") == "keep" for item in summaries)
     return passed, summaries, {
         "area_report_json": str(report_json),
         "area_report_csv": str(report_csv) if report_csv is not None else None,
@@ -572,18 +910,39 @@ def write_per_video_result(
     trajectory_plot = save_trajectory_plot(row_dir, tracking_json, args.fps) if tracking_json is not None and tracking_json.exists() else None
     extra = parse_extra_json(result)
     tracking_quality = None
+    tracking_initialization = None
     if tracking_json is not None and tracking_json.exists():
         try:
             tracking_data = json.loads(tracking_json.read_text(encoding="utf-8"))
             tracking_quality = (tracking_data.get("quality_checks") or {}).get("tracking_quality")
+            tracking_initialization = tracking_data.get("batch_initialization")
         except Exception:
             tracking_quality = None
+            tracking_initialization = None
+    if tracking_initialization is None:
+        raw_initialization = row.get("Resolved_Tracking_Initialization_JSON")
+        if isinstance(raw_initialization, str) and raw_initialization:
+            try:
+                tracking_initialization = json.loads(raw_initialization)
+            except json.JSONDecodeError:
+                tracking_initialization = {"status": "invalid_provenance_json"}
 
     result_compact = {k: v for k, v in result.items() if k != "Extra_JSON"}
+    sam2_scene_dir = Path(args.workspace_root) / "sam2_tracks" / scene_name_for_row(row)
+    local_vis = row_dir / "tracking_vis.mp4"
+    source_vis = sam2_scene_dir / "tracking_vis.mp4"
+    local_debug = row_dir / "auto_init_debug.jpg"
+    source_debug = sam2_scene_dir / "auto_init_debug.jpg"
     artifact_paths = {
         "tracking_json": str(tracking_json) if tracking_json is not None else None,
         "mask_qc_json": area_paths.get("area_report_json"),
         "trajectory_plot": str(trajectory_plot) if trajectory_plot is not None else None,
+        "tracking_visualization": str(local_vis if local_vis.exists() else source_vis) if (local_vis.exists() or source_vis.exists()) else None,
+        "auto_init_debug": str(local_debug if local_debug.exists() else source_debug) if (local_debug.exists() or source_debug.exists()) else None,
+        "resolved_init_prompts": str(row_dir / "resolved_init_prompts.json")
+        if (row_dir / "resolved_init_prompts.json").exists()
+        else None,
+        "sam2_mask_directory": str(sam2_scene_dir / "masks"),
         "mask_qc_plots": [
             item.get("plot")
             for item in area_summaries
@@ -601,10 +960,23 @@ def write_per_video_result(
         "physics_result": result_compact,
         "physics_extra": extra,
         "mask_qc": {
-            "status": "pass" if all(item.get("decision") == "keep" for item in area_summaries) else "flagged",
+            "diagnostic_version": "main_mask_diagnostics_v1",
+            "evidence_schema_version": 1,
+            "evidence_source": "tracking_and_masks",
+            "status": (
+                "not_evaluated"
+                if not area_summaries
+                else "pass" if all(item.get("decision") == "keep" for item in area_summaries) else "flagged"
+            ),
             "objects": area_summaries,
         },
         "tracking_quality": tracking_quality,
+        "tracking_initialization": tracking_initialization,
+        "semantic_verification": (
+            tracking_initialization.get("semantic_verification")
+            if isinstance(tracking_initialization, dict)
+            else None
+        ),
         "artifacts": artifact_paths,
     }
     path = row_dir / "result.json"
@@ -643,6 +1015,9 @@ def main() -> None:
 
     for _, pd_row in df.iterrows():
         row = row_to_dict(pd_row)
+        # Runtime-only context for evaluators that resolve repository-relative
+        # oracle assets.  It is deliberately not required in the portable XLSX.
+        row["_Workspace_Root"] = args.workspace_root
         try:
             out_json = output_tracking_json(output_dir, row, args.output_layout)
             track_error = None
@@ -757,6 +1132,7 @@ def main() -> None:
                 fps=args.fps,
                 save_diag=args.save_diagnostics,
                 strict=args.strict,
+                spring_period_protocol=args.spring_period_protocol,
             )
             eval_results.append(result)
             result_path = write_per_video_result(

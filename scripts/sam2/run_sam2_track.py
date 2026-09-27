@@ -8,6 +8,7 @@ import json
 import time
 import shutil
 import argparse
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,9 @@ import torch
 WORKSPACE_ROOT_FOR_IMPORTS = Path(__file__).resolve().parents[2]
 if str(WORKSPACE_ROOT_FOR_IMPORTS) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT_FOR_IMPORTS))
+
+
+SAM2_PRECISION_CHOICES = ("auto", "fp32", "fp16", "bf16")
 
 
 def parse_args():
@@ -113,8 +117,153 @@ def parse_args():
     parser.add_argument("--vos-optimized", action="store_true")
     parser.add_argument("--offload-video-to-cpu", action="store_true")
     parser.add_argument("--offload-state-to-cpu", action="store_true")
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="auto",
+        choices=SAM2_PRECISION_CHOICES,
+        help=(
+            "SAM2 inference precision. 'auto' uses BF16 when supported and FP16 otherwise; "
+            "'fp32' disables autocast. The selected policy covers initialization, prompt "
+            "injection, and every propagation iteration."
+        ),
+    )
 
     return parser.parse_args()
+
+
+def resolve_precision_policy(
+    requested: str,
+    *,
+    cuda_available: bool,
+    bf16_supported: bool,
+):
+    """Resolve a requested SAM2 precision without touching CUDA.
+
+    Keeping this decision function pure makes the precision behavior testable on
+    CPU-only machines. Runtime CUDA checks are supplied by ``main``.
+    """
+    requested = str(requested).strip().lower()
+    if requested not in SAM2_PRECISION_CHOICES:
+        choices = ", ".join(SAM2_PRECISION_CHOICES)
+        raise ValueError(f"Unsupported precision '{requested}'. Choose one of: {choices}.")
+
+    if requested == "auto":
+        if not cuda_available:
+            resolved = "fp32"
+        else:
+            resolved = "bf16" if bf16_supported else "fp16"
+    else:
+        resolved = requested
+
+    if resolved in ("fp16", "bf16") and not cuda_available:
+        raise RuntimeError(
+            f"--precision {resolved} requires CUDA. Use --precision fp32 on CPU."
+        )
+    if resolved == "bf16" and not bf16_supported:
+        raise RuntimeError(
+            "--precision bf16 was requested, but the active CUDA device does not "
+            "report BF16 support. Use --precision fp16 or --precision fp32."
+        )
+
+    return {
+        "requested": requested,
+        "resolved": resolved,
+        "autocast_enabled": resolved in ("fp16", "bf16"),
+        "autocast_device_type": "cuda" if resolved in ("fp16", "bf16") else None,
+        "autocast_dtype": resolved if resolved in ("fp16", "bf16") else None,
+    }
+
+
+@contextmanager
+def sam2_inference_context(precision_policy):
+    """Apply one inference/autocast policy to a complete SAM2 operation."""
+    with torch.inference_mode():
+        if not precision_policy["autocast_enabled"]:
+            yield
+            return
+
+        dtype = {
+            "fp16": torch.float16,
+            "bf16": torch.bfloat16,
+        }[precision_policy["resolved"]]
+        with torch.autocast(
+            device_type=precision_policy["autocast_device_type"],
+            dtype=dtype,
+        ):
+            yield
+
+
+def initialize_predictor_state(
+    predictor,
+    *,
+    frames_dir: Path,
+    offload_video_to_cpu: bool,
+    offload_state_to_cpu: bool,
+    prompts,
+    inference_context_factory,
+):
+    """Initialize SAM2 and inject prompts inside the supplied inference context."""
+    with inference_context_factory():
+        try:
+            inference_state = predictor.init_state(
+                video_path=str(frames_dir),
+                offload_video_to_cpu=offload_video_to_cpu,
+                offload_state_to_cpu=offload_state_to_cpu,
+            )
+        except TypeError:
+            inference_state = predictor.init_state(video_path=str(frames_dir))
+
+        for prompt in prompts:
+            positive_points = prompt.get("positive_points", prompt.get("points"))
+            if positive_points is None:
+                positive_points = [prompt["point"]]
+            negative_points = list(prompt.get("negative_points", []))
+            points_in = list(positive_points) + negative_points
+            labels_in = [prompt["label"]] * len(positive_points) + [0] * len(negative_points)
+            point = np.array(points_in, dtype=np.float32)
+            label = np.array(labels_in, dtype=np.int32)
+
+            prompt_kwargs = {
+                "inference_state": inference_state,
+                "frame_idx": int(prompt["frame_idx"]),
+                "obj_id": int(prompt["obj_id"]),
+                "points": point,
+                "labels": label,
+            }
+            if prompt["box"] is not None:
+                prompt_kwargs["box"] = np.array(prompt["box"], dtype=np.float32)
+
+            predictor.add_new_points_or_box(**prompt_kwargs)
+
+    return inference_state
+
+
+def propagate_in_video_with_context(
+    predictor,
+    inference_state,
+    *,
+    start_frame_idx: int,
+    reverse: bool,
+    inference_context_factory,
+):
+    """Yield a complete lazy SAM2 propagation while its precision context is active."""
+    with inference_context_factory():
+        try:
+            iterator = predictor.propagate_in_video(
+                inference_state,
+                start_frame_idx=int(start_frame_idx),
+                reverse=bool(reverse),
+            )
+        except TypeError:
+            if reverse:
+                print("Current SAM2 predictor does not support reverse propagation; skipping reverse pass.")
+                return
+            iterator = predictor.propagate_in_video(inference_state)
+
+        # SAM2 returns a lazy generator. The context must remain entered while
+        # every item is produced, not only while the generator is constructed.
+        yield from iterator
 
 
 def ensure_dir(path: Path):
@@ -1066,6 +1215,16 @@ def main():
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU is required for SAM2 video inference.")
 
+    bf16_supported = bool(
+        hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported()
+    )
+    precision_policy = resolve_precision_policy(
+        args.precision,
+        cuda_available=True,
+        bf16_supported=bf16_supported,
+    )
+    inference_context_factory = lambda: sam2_inference_context(precision_policy)
+
     data_scene_dir = workspace_root / "data" / "custom" / scene_name
     raw_dir = data_scene_dir / "raw"
     frames_dir = data_scene_dir / "frames"
@@ -1089,13 +1248,21 @@ def main():
         if (not workspace_video_path.exists()) or args.overwrite_outputs:
             shutil.copy2(video_path, workspace_video_path)
 
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.set_float32_matmul_precision("high")
+    tf32_enabled = precision_policy["resolved"] != "fp32"
+    torch.backends.cuda.matmul.allow_tf32 = tf32_enabled
+    torch.backends.cudnn.allow_tf32 = tf32_enabled
+    torch.set_float32_matmul_precision("high" if tf32_enabled else "highest")
 
     print("=" * 70)
     print("SAM2 tracking inside workspace")
     print("=" * 70)
+    print(
+        "Precision policy: "
+        f"requested={precision_policy['requested']}, "
+        f"resolved={precision_policy['resolved']}, "
+        f"autocast={precision_policy['autocast_enabled']}, "
+        f"tf32={tf32_enabled}"
+    )
 
     print("\n[1] Preparing shared frames ...")
     fps, total_frames, W, H, extracted_now = extract_video_to_frames(
@@ -1183,10 +1350,26 @@ def main():
         init_frame_idx = int(auto_init_result["frame_idx"])
         prompt_mode = f"auto_{detector_used}"
         for i, item in enumerate(auto_init_results):
-            point_x = float(item["point"][0])
-            point_y = float(item["point"][1])
-            box = [float(v) for v in item["bbox"]] if not args.no_auto_init_box else None
-            if args.no_auto_init_negative_points or not item.get("object_refined", False):
+            positive_points = [
+                [float(value) for value in point]
+                for point in item.get("positive_points", [item["point"]])
+            ]
+            point_x = float(positive_points[0][0])
+            point_y = float(positive_points[0][1])
+            if "prompt_box" in item:
+                box = (
+                    [float(value) for value in item["prompt_box"]]
+                    if item["prompt_box"] is not None
+                    else None
+                )
+            else:
+                box = [float(v) for v in item["bbox"]] if not args.no_auto_init_box else None
+            if "negative_points" in item:
+                negative_points = [
+                    [float(value) for value in point]
+                    for point in item["negative_points"]
+                ]
+            elif args.no_auto_init_negative_points or not item.get("object_refined", False):
                 negative_points = []
             else:
                 negative_points = make_negative_points_around_box(box, W, H)
@@ -1195,6 +1378,7 @@ def main():
                 "obj_id": obj_id,
                 "frame_idx": int(item["frame_idx"]),
                 "point": [point_x, point_y],
+                "positive_points": positive_points,
                 "label": init_label,
                 "box": box,
                 "negative_points": negative_points,
@@ -1203,7 +1387,7 @@ def main():
             print(
                 "Auto prompt: "
                 f"obj_id={obj_id}, frame={item['frame_idx']}, "
-                f"point=({point_x:.2f}, {point_y:.2f}), bbox={box}, "
+                f"point=({point_x:.2f}, {point_y:.2f}), pos_pts={len(positive_points)}, bbox={box}, "
                 f"score={item['score']:.2f}, fill={item['fill_ratio']:.2f}, "
                 f"aspect={item['aspect_ratio']:.2f}, texture={item['texture_strength']:.2f}, "
                 f"shadow={item.get('shadow_score', 0.0):.2f}, refined={item.get('object_refined', False)}, "
@@ -1223,6 +1407,7 @@ def main():
             "obj_id": init_obj_id,
             "frame_idx": init_frame_idx,
             "point": [float(args.init_point_x), float(args.init_point_y)],
+            "positive_points": [[float(args.init_point_x), float(args.init_point_y)]],
             "label": init_label,
             "box": init_box,
             "negative_points": [],
@@ -1246,38 +1431,14 @@ def main():
     print("SAM2 loaded.")
 
     print("\n[3] Initializing inference state ...")
-    with torch.inference_mode():
-        amp_dtype = torch.bfloat16 if (
-            hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported()
-        ) else torch.float16
-
-        with torch.autocast("cuda", dtype=amp_dtype):
-            try:
-                inference_state = predictor.init_state(
-                    video_path=str(frames_dir),
-                    offload_video_to_cpu=args.offload_video_to_cpu,
-                    offload_state_to_cpu=args.offload_state_to_cpu,
-                )
-            except TypeError:
-                inference_state = predictor.init_state(video_path=str(frames_dir))
-
-            for prompt in prompts:
-                points_in = [prompt["point"]] + list(prompt.get("negative_points", []))
-                labels_in = [prompt["label"]] + [0] * len(prompt.get("negative_points", []))
-                point = np.array(points_in, dtype=np.float32)
-                label = np.array(labels_in, dtype=np.int32)
-
-                prompt_kwargs = {
-                    "inference_state": inference_state,
-                    "frame_idx": int(prompt["frame_idx"]),
-                    "obj_id": int(prompt["obj_id"]),
-                    "points": point,
-                    "labels": label,
-                }
-                if prompt["box"] is not None:
-                    prompt_kwargs["box"] = np.array(prompt["box"], dtype=np.float32)
-
-                predictor.add_new_points_or_box(**prompt_kwargs)
+    inference_state = initialize_predictor_state(
+        predictor,
+        frames_dir=frames_dir,
+        offload_video_to_cpu=args.offload_video_to_cpu,
+        offload_state_to_cpu=args.offload_state_to_cpu,
+        prompts=prompts,
+        inference_context_factory=inference_context_factory,
+    )
 
     for prompt in prompts:
         print(
@@ -1305,6 +1466,10 @@ def main():
             "obj_id": int(p["obj_id"]),
             "init_frame_idx": int(p["frame_idx"]),
             "init_point": [float(p["point"][0]), float(p["point"][1])],
+            "positive_points": [
+                [float(value) for value in point]
+                for point in p.get("positive_points", [p["point"]])
+            ],
             "init_label": int(p["label"]),
             "init_box": p["box"],
             "negative_points": p.get("negative_points", []),
@@ -1334,6 +1499,8 @@ def main():
             "mode": prompt_mode,
             "init_frame_idx": init_frame_idx,
             "init_point": [args.init_point_x, args.init_point_y],
+            "positive_points": prompt_records[0]["positive_points"],
+            "negative_points": prompt_records[0]["negative_points"],
             "init_label": init_label,
             "init_box": init_box,
             "auto_init": auto_init_result,
@@ -1355,6 +1522,8 @@ def main():
         "init_obj_id": init_obj_id,
         "init_point_x": args.init_point_x,
         "init_point_y": args.init_point_y,
+        "init_positive_points": prompt_records[0]["positive_points"],
+        "init_negative_points": prompt_records[0]["negative_points"],
         "init_label": init_label,
         "init_box": init_box,
         "auto_init": auto_init_result,
@@ -1382,6 +1551,10 @@ def main():
         "auto_init_target_hint": args.auto_init_target_hint,
         "model_cfg": args.model_cfg,
         "model_weights": str(model_weights),
+        "precision": precision_policy["resolved"],
+        "precision_requested": precision_policy["requested"],
+        "precision_policy": precision_policy,
+        "tf32_enabled": tf32_enabled,
     }
 
     with open(run_config_path, "w", encoding="utf-8") as f:
@@ -1401,17 +1574,13 @@ def main():
 
     for direction_name, reverse, start_frame_idx in propagation_jobs:
         print(f"Propagating {direction_name} from frame {start_frame_idx} ...")
-        try:
-            iterator = predictor.propagate_in_video(
-                inference_state,
-                start_frame_idx=int(start_frame_idx),
-                reverse=bool(reverse),
-            )
-        except TypeError:
-            if reverse:
-                print("Current SAM2 predictor does not support reverse propagation; skipping reverse pass.")
-                continue
-            iterator = predictor.propagate_in_video(inference_state)
+        iterator = propagate_in_video_with_context(
+            predictor,
+            inference_state,
+            start_frame_idx=int(start_frame_idx),
+            reverse=bool(reverse),
+            inference_context_factory=inference_context_factory,
+        )
 
         for out_frame_idx, out_obj_ids, out_mask_logits in iterator:
             frame_idx = int(out_frame_idx)

@@ -1,0 +1,61 @@
+{
+  "protocol_id": "legacy_v1",
+  "gamma": 0.35,
+  "aggregation": "min",
+  "object_aggregation": "min",
+  "missing_policy": "legacy",
+  "window_policy": "legacy_middle_15_85",
+  "components": {
+    "area_ratio_p95_p05": {
+      "good_value": 2.0,
+      "bad_value": 4.0,
+      "direction": "high_bad"
+    },
+    "area_cv": {
+      "good_value": 0.25,
+      "bad_value": 0.7,
+      "direction": "high_bad"
+    },
+    "bbox_width_cv": {
+      "good_value": 0.2,
+      "bad_value": 0.6,
+      "direction": "high_bad"
+    },
+    "bbox_height_cv": {
+      "good_value": 0.2,
+      "bad_value": 0.6,
+      "direction": "high_bad"
+    },
+    "bbox_aspect_cv": {
+      "good_value": 0.2,
+      "bad_value": 0.6,
+      "direction": "high_bad"
+    },
+    "max_log_jump": {
+      "good_value": 0.45,
+      "bad_value": 1.2,
+      "direction": "high_bad"
+    },
+    "trend_scale_ratio": {
+      "good_value": 1.6,
+      "bad_value": 3.0,
+      "direction": "high_bad"
+    },
+    "max_centroid_step_norm_by_diameter": {
+      "good_value": 2.5,
+      "bad_value": 5.0,
+      "direction": "high_bad"
+    },
+    "translation_aligned_iou_median": {
+      "good_value": 0.65,
+      "bad_value": 0.3,
+      "direction": "low_bad"
+    },
+    "middle_coverage": {
+      "good_value": 0.7,
+      "bad_value": 0.5,
+      "direction": "low_bad"
+    }
+  },
+  "groups": {}
+}

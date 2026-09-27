@@ -1,6 +1,10 @@
 # Batch Evaluation Usage
 
-This workspace is intended to run video tracking, mask quality control, and physics evaluation in batch.
+[English](BATCH_USAGE.md) | [简体中文](BATCH_USAGE_zh-CN.md)
+
+This guide covers the executable pipeline behind the evaluation protocol described in the PhysEval paper: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
+
+The batch stage decides whether a video is measurable and estimates its physical quantity; model-level scoring is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability is retained as a soft score multiplier.
 
 The recommended entrypoint is:
 
@@ -18,6 +22,12 @@ sam2 repo   repo/sam2
 outputs     batch_eval_results
 detector    yolo_then_motion
 yolo model  yolov8n.pt, if it exists under workspace root
+```
+
+The automatic metadata default is retained for local workspaces. For the released 500-prompt benchmark, pass the repository workbook explicitly:
+
+```text
+benchmark/metadata/phys_t2v_bench_metadata.xlsx
 ```
 
 Default output layout:
@@ -52,19 +62,20 @@ batch_eval_results/<metric>/<prompt_id>/tracking_points.json
 
 These markers are written during batch processing and are later used by scoring.
 
-## Running One Model With the 500-Video Metadata
+Each compact record preserves the benchmark specification, physics output, tracking status, mask diagnostics, target and measured values, relative error when available, and reason tokens. This is the auditable unit that is later aggregated into effective-video scores and discard diagnostics.
 
-For `t2v_physics_50_per_indicator_metadata_v2_earth_b2.xlsx`, put the metadata and videos under the workspace like this:
+## Running One Model on the Released 500-Prompt Benchmark
+
+The released benchmark contains 10 physical metrics with 50 prompts per metric. Generate one video per prompt, use the exact filename in the workbook's `Video_File` column, and organize one model as follows:
 
 ```text
-data/
-  metadata/
-    t2v_physics_50_per_indicator_metadata_v2_earth_b2.xlsx
-  t2v_videos/
-    V001.mp4
-    V002.mp4
-    ...
-    P050.mp4
+benchmark/metadata/
+  phys_t2v_bench_metadata.xlsx
+data/t2v_videos/<model_name>/
+  V001.mp4
+  V002.mp4
+  ...
+  P050.mp4
 ```
 
 Video order in the folder does not matter. The batch script looks up each file by the exact value in the Excel `Video_File` column. On Linux servers, names are case-sensitive, so `V001.mp4` and `v001.mp4` are different files.
@@ -73,7 +84,7 @@ If you are comparing multiple text-to-video models, keep one output directory pe
 
 ```bash
 python scripts/run_batch_simple.py \
-  --metadata data/metadata/t2v_physics_50_per_indicator_metadata_v2_earth_b2.xlsx \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
   --video-root data/t2v_videos/model_a \
   --output-dir batch_eval_results/model_a
 ```
@@ -81,8 +92,13 @@ python scripts/run_batch_simple.py \
 After the batch run, score that model with:
 
 ```bash
-python scripts/score_results.py --result-root batch_eval_results/model_a --model-name model_a
+python scripts/score_results.py \
+  --result-root batch_eval_results/model_a \
+  --model-name model_a \
+  --weak-valid-multiplier 0.8
 ```
+
+The explicit `0.8` matches the paper protocol; see `SCORING_USAGE.md` for the current CLI-default compatibility note.
 
 ## Common Commands
 
@@ -251,9 +267,9 @@ Show available options:
 python scripts/run_batch_simple.py --help
 ```
 
-## Result Files for Future Scoring
+## Result Files Used by Model-Level Scoring
 
-Future model-level scoring scripts should read:
+The model-level scoring script reads:
 
 ```text
 batch_eval_results/<metric>/*/result.json
@@ -275,7 +291,10 @@ This keeps per-video data compact while preserving enough information for later 
 After a batch run finishes, score the compact results with:
 
 ```bash
-python scripts/score_results.py --result-root batch_eval_results --model-name my_model
+python scripts/score_results.py \
+  --result-root batch_eval_results \
+  --model-name my_model \
+  --weak-valid-multiplier 0.8
 ```
 
 Detailed scoring rules are documented in:

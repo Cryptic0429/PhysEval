@@ -18,6 +18,9 @@ if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 
 from physics_eval.utils.tracking_quality import analyze_tracking_quality_file
+from physics_eval.quality.protocol import load_protocol, protocol_hash
+from physics_eval.quality.scoring import compute_qmask
+from physics_eval.quality.adapters import required_ids
 
 
 DEFAULT_TOLERANCES = {
@@ -51,32 +54,14 @@ STATUS_MULTIPLIERS = {
 
 PHYSICS_VALID_STATUSES = {"valid", "weak_valid"}
 
-MASK_SCORE_THRESHOLDS = {
-    "area_ratio_p95_p05": (2.00, 4.00, "high_bad"),
-    "area_cv": (0.25, 0.70, "high_bad"),
-    "bbox_width_cv": (0.20, 0.60, "high_bad"),
-    "bbox_height_cv": (0.20, 0.60, "high_bad"),
-    "bbox_aspect_cv": (0.20, 0.60, "high_bad"),
-    "max_log_jump": (0.45, 1.20, "high_bad"),
-    "trend_scale_ratio": (1.60, 3.00, "high_bad"),
-    "max_centroid_step_norm_by_diameter": (2.50, 5.00, "high_bad"),
-    "translation_aligned_iou_median": (0.30, 0.65, "low_bad"),
-    "middle_coverage": (0.50, 0.70, "low_bad"),
-}
-MASK_SCORE_GAMMA = 0.35
-MASK_FLAG_FLOOR = 0.85
-MASK_HARD_FAIL_REASONS = {
-    "insufficient_valid_middle_frames",
-    "low_middle_coverage",
-}
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Aggregate compact per-video result.json files into metric/model scores."
     )
     parser.add_argument("--result-root", default="batch_eval_results",
                         help="Root containing <metric>/<prompt_id>/result.json")
+    parser.add_argument("--scoring-protocol", default="grouped_v2_candidate", help="Built-in Qmask protocol name or JSON path")
+    parser.add_argument("--metadata", default=str(WORKSPACE_ROOT / "benchmark/metadata/csv/phys_t2v_bench_metadata__metadata.csv"), help="Expected benchmark CSV/XLSX; use none for explicitly partial/custom scoring")
     parser.add_argument("--metric", default=None,
                         help="Only score one metric directory, e.g. friction_coefficient")
     parser.add_argument("--model-name", default=None,
@@ -105,8 +90,11 @@ def parse_args() -> argparse.Namespace:
                         help="Flag if primary object motion extent is below this many object diameters. Default: 0.75")
     parser.add_argument("--min-object-coverage", type=float, default=0.50,
                         help="Object must be valid in at least this fraction of frames to count. Default: 0.50")
+    parser.add_argument("--recompute-tracking-quality", action="store_true",
+                        help=("Recompute tracking-quality status from tracking_points.json with the requested "
+                              "thresholds instead of reusing an embedded status. Required for threshold sensitivity."))
     parser.add_argument("--allow-contract-errors", action="store_true",
-                        help="Do not stop when a valid/weak_valid physics result has no computable score; write evaluator_contract_error instead")
+                        help="Collect evaluator_contract_error rows into an incomplete report instead of failing at the first row; no formal aggregate is published")
     parser.add_argument("--no-plots", action="store_true",
                         help="Do not generate plots")
     args = parser.parse_args()
@@ -120,6 +108,9 @@ def parse_args() -> argparse.Namespace:
         value = getattr(args, name)
         if value is not None and not (0.0 <= value <= 1.0):
             parser.error(f"--{name.replace('_', '-')} must be between 0 and 1")
+    args.qmask_protocol = load_protocol(args.scoring_protocol)
+    if args.qmask_protocol["missing_policy"] != "legacy" and (args.mask_policy != "continuous" or args.strict_qc or args.tracking_policy != "hard_fail"):
+        parser.error("Candidate protocols require continuous masks and hard-fail tracking; no legacy policy overrides")
     return args
 
 
@@ -202,30 +193,6 @@ def base_score(rel_error: float | None, tau: float) -> float | None:
     return float(100.0 * math.exp(-rel_error / tau))
 
 
-def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
-    return min(high, max(low, value))
-
-
-def ramp_score(value: float | None, good: float, bad: float, direction: str) -> float | None:
-    if value is None:
-        return None
-    if direction == "high_bad":
-        if value <= good:
-            return 1.0
-        if value >= bad:
-            return 0.0
-        normalized = (value - good) / max(bad - good, 1e-12)
-        return clamp(1.0 - math.pow(normalized, MASK_SCORE_GAMMA))
-    if direction == "low_bad":
-        if value >= bad:
-            return 1.0
-        if value <= good:
-            return 0.0
-        normalized = (bad - value) / max(bad - good, 1e-12)
-        return clamp(1.0 - math.pow(normalized, MASK_SCORE_GAMMA))
-    raise ValueError(f"unknown mask score direction: {direction}")
-
-
 def mask_qc_status(result: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any]]]:
     mask_qc = result.get("mask_qc") or {}
     objects = mask_qc.get("objects") or []
@@ -241,29 +208,6 @@ def mask_qc_status(result: dict[str, Any]) -> tuple[str, list[str], list[dict[st
     if flagged or str(mask_qc.get("status") or "") == "flagged":
         return "flagged", sorted(set(reasons)), objects
     return "pass", [], objects
-
-
-def object_mask_quality_score(item: dict[str, Any]) -> tuple[float, dict[str, float]]:
-    component_scores: dict[str, float] = {}
-    for key, (good, bad, direction) in MASK_SCORE_THRESHOLDS.items():
-        score = ramp_score(as_float(item.get(key)), good, bad, direction)
-        if score is not None:
-            component_scores[key] = score
-
-    reasons = str(item.get("reasons") or "")
-    if any(reason in reasons for reason in MASK_HARD_FAIL_REASONS):
-        if "insufficient_valid_middle_frames" in reasons:
-            component_scores["valid_middle_frames"] = 0.0
-        if "low_middle_coverage" in reasons and "middle_coverage" not in component_scores:
-            component_scores["middle_coverage"] = 0.0
-
-    decision = str(item.get("decision") or "")
-    if not component_scores:
-        return (1.0 if decision in ("", "keep") else MASK_FLAG_FLOOR), component_scores
-    score = min(component_scores.values())
-    if decision not in ("", "keep") and score > 0.0:
-        score = max(score, MASK_FLAG_FLOOR)
-    return score, component_scores
 
 
 def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -293,32 +237,8 @@ def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, 
             "objects": [],
         }
 
-    object_scores: list[dict[str, Any]] = []
-    for item in objects:
-        score, components = object_mask_quality_score(item)
-        object_scores.append({
-            "object_id": item.get("object_id"),
-            "score": score,
-            "decision": item.get("decision"),
-            "components": components,
-        })
-
-    if object_scores:
-        score = min(float(item["score"]) for item in object_scores)
-    else:
-        score = 1.0 if qc_status == "pass" else 0.0
-    if score <= 0:
-        status = "fail"
-    elif qc_status == "pass" and score >= 0.999:
-        status = "pass"
-    else:
-        status = "weak"
-    return {
-        "status": status,
-        "score": score,
-        "reasons": qc_reasons,
-        "objects": object_scores,
-    }
+    protocol = getattr(args, "qmask_protocol", None) or load_protocol("grouped_v2_candidate")
+    return compute_qmask(result.get("mask_qc") or {}, protocol, required_ids(result))
 
 
 def tracking_path_from_result(result: dict[str, Any], result_path: Path) -> Path | None:
@@ -356,9 +276,10 @@ def analyze_tracking_quality(
     result_path: Path,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    embedded = result.get("tracking_quality")
-    if isinstance(embedded, dict):
-        return embedded
+    if not args.recompute_tracking_quality:
+        embedded = result.get("tracking_quality")
+        if isinstance(embedded, dict):
+            return embedded
 
     tracking_path = tracking_path_from_result(result, result_path)
     expected_objects = expected_object_count(result)
@@ -370,14 +291,15 @@ def analyze_tracking_quality(
             "reasons": ["tracking_json_missing"],
         }
 
-    try:
-        data = load_json(tracking_path)
-        quality = ((data.get("quality_checks") or {}).get("tracking_quality")
-                   if isinstance(data, dict) else None)
-        if isinstance(quality, dict):
-            return quality
-    except Exception:
-        pass
+    if not args.recompute_tracking_quality:
+        try:
+            data = load_json(tracking_path)
+            quality = ((data.get("quality_checks") or {}).get("tracking_quality")
+                       if isinstance(data, dict) else None)
+            if isinstance(quality, dict):
+                return quality
+        except Exception:
+            pass
 
     return analyze_tracking_quality_file(
         tracking_path,
@@ -415,7 +337,7 @@ def status_multipliers_for_report(args: argparse.Namespace) -> dict[str, float]:
 
 
 def exclusion_reasons(
-    physics_valid: bool,
+    both_gates_pass: bool,
     tracking_passes_selected_policy: bool,
     evaluator_contract_error: bool = False,
 ) -> list[str]:
@@ -425,7 +347,7 @@ def exclusion_reasons(
         return reasons
     if evaluator_contract_error:
         reasons.append("evaluator_contract_error")
-    if not physics_valid:
+    if not both_gates_pass:
         reasons.append("physics_status_not_valid")
     return reasons
 
@@ -454,11 +376,12 @@ def score_one(path: Path, tolerances: dict[str, float], args: argparse.Namespace
         discard_overlap_category = "physics_only"
     else:
         discard_overlap_category = "neither"
-    physics_valid = tracking_passes_selected_policy and status in PHYSICS_VALID_STATUSES
+    both_gates_pass = tracking_passes_selected_policy and physics_status_pass
     status_mult = multiplier_for_status(status, args) if tracking_passes_selected_policy else 0.0
 
     rel = None
     raw = None
+    mask_info = {}
     mask_status = "not_evaluated"
     mask_score = None
     qc_reasons: list[str] = []
@@ -466,25 +389,29 @@ def score_one(path: Path, tolerances: dict[str, float], args: argparse.Namespace
     measurement_quality_mult = 0.0 if not tracking_passes_selected_policy else None
     measurement_quality_status = "fail" if not tracking_passes_selected_policy else "not_evaluated"
 
-    if physics_valid:
+    # Q_mask is a measurement-quality score, not an attrition diagnostic.
+    # It is evaluated only after both eligibility gates have passed.
+    if both_gates_pass:
         rel = relative_error(physics)
         raw = base_score(rel, tau)
 
         mask_info = mask_quality(result, args)
         mask_status = str(mask_info.get("status") or "fail")
-        mask_score = float(mask_info.get("score") or 0.0)
+        mask_score = mask_info.get("score")
         qc_reasons = list(mask_info.get("reasons") or [])
         mask_objects = list(mask_info.get("objects") or [])
 
-        measurement_quality_mult = tracking_mult * mask_score
-        if measurement_quality_mult <= 0:
+        measurement_quality_mult = tracking_mult * mask_score if mask_score is not None else None
+        if measurement_quality_mult is None:
+            measurement_quality_status = "score_unavailable"
+        elif measurement_quality_mult <= 0:
             measurement_quality_status = "fail"
         elif tracking_status == "pass" and mask_status == "pass" and measurement_quality_mult >= 0.999:
             measurement_quality_status = "pass"
         else:
             measurement_quality_status = "weak"
 
-    evaluator_contract_error = physics_valid and tracking_passes_selected_policy and raw is None
+    evaluator_contract_error = both_gates_pass and raw is None
     if evaluator_contract_error and not args.allow_contract_errors:
         raise ValueError(
             f"{path}: physics_result.Status is {status!r} and tracking passes the selected policy, "
@@ -493,7 +420,7 @@ def score_one(path: Path, tolerances: dict[str, float], args: argparse.Namespace
         )
 
     reasons = exclusion_reasons(
-        physics_valid=physics_valid,
+        both_gates_pass=both_gates_pass,
         tracking_passes_selected_policy=tracking_passes_selected_policy,
         evaluator_contract_error=evaluator_contract_error,
     )
@@ -504,7 +431,14 @@ def score_one(path: Path, tolerances: dict[str, float], args: argparse.Namespace
         else 0.0
     )
 
+    score_available = not both_gates_pass or (raw is not None and mask_score is not None)
+    if both_gates_pass and not score_available:
+        adjusted = None
     return {
+        "score_available": score_available,
+        "qmask_protocol_id": mask_info.get("protocol_id"),
+        "qmask_protocol_hash": mask_info.get("protocol_hash"),
+        "qmask_details": mask_info,
         "model": args.model_name or Path(args.result_root).expanduser().resolve().name,
         "metric": metric,
         "prompt_id": prompt_id(result, path),
@@ -516,7 +450,8 @@ def score_one(path: Path, tolerances: dict[str, float], args: argparse.Namespace
         "base_score": raw,
         "raw_score": raw,
         "status": status,
-        "physics_valid": physics_valid,
+        "both_gates_pass": both_gates_pass,
+        "q_mask_evaluated": both_gates_pass,
         "physics_status_pass": physics_status_pass,
         "physics_fitting_problem": physics_fitting_problem,
         "status_multiplier": status_mult,
@@ -622,7 +557,8 @@ def discard_overlap_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def summarize_metric(metric: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     n_total = len(items)
-    physics_valid_items = [r for r in items if r["physics_valid"]]
+    both_gates_pass_items = [r for r in items if r["both_gates_pass"]]
+    physics_status_pass_items = [r for r in items if r["physics_status_pass"]]
     tracking_pass_items = [r for r in items if r["tracking_quality_pass"]]
     mask_pass_items = [r for r in items if r["mask_qc_pass"]]
     measurement_pass_items = [r for r in items if r["measurement_quality_status"] == "pass"]
@@ -632,7 +568,11 @@ def summarize_metric(metric: str, items: list[dict[str, Any]]) -> dict[str, Any]
     adjusted_effective = [r["adjusted_score"] for r in effective_items]
     base_effective = [r["base_score"] for r in effective_items]
     rel_effective = [r["relative_error"] for r in effective_items]
-    rel_physics_valid = [r["relative_error"] for r in physics_valid_items if r["relative_error"] is not None]
+    rel_both_gates_pass = [
+        r["relative_error"]
+        for r in both_gates_pass_items
+        if r["relative_error"] is not None
+    ]
 
     status_counts = Counter(str(item["status"]) for item in items)
     qc_counts = Counter(str(item["mask_qc_status"]) for item in items)
@@ -646,12 +586,14 @@ def summarize_metric(metric: str, items: list[dict[str, Any]]) -> dict[str, Any]
     return {
         "metric": metric,
         "n_total": n_total,
-        "n_physics_valid_or_weak": len(physics_valid_items),
+        "n_both_gates_pass": len(both_gates_pass_items),
+        "n_physics_status_pass": len(physics_status_pass_items),
         "n_tracking_quality_pass": len(tracking_pass_items),
         "n_mask_qc_pass": len(mask_pass_items),
         "n_measurement_quality_pass": len(measurement_pass_items),
         "n_effective_for_score": len(effective_items),
-        "physics_valid_rate": len(physics_valid_items) / max(n_total, 1),
+        "both_gates_pass_rate": len(both_gates_pass_items) / max(n_total, 1),
+        "physics_status_pass_rate": len(physics_status_pass_items) / max(n_total, 1),
         "tracking_quality_pass_rate": len(tracking_pass_items) / max(n_total, 1),
         "mask_qc_pass_rate": len(mask_pass_items) / max(n_total, 1),
         "measurement_quality_pass_rate": len(measurement_pass_items) / max(n_total, 1),
@@ -663,7 +605,7 @@ def summarize_metric(metric: str, items: list[dict[str, Any]]) -> dict[str, Any]
         "mean_mask_quality_score": mean([r["mask_quality_score"] for r in items]),
         "mean_measurement_quality_multiplier": mean([r["measurement_quality_multiplier"] for r in items]),
         "median_relative_error_effective": median(rel_effective),
-        "median_relative_error_physics_valid": median(rel_physics_valid),
+        "median_relative_error_both_gates_pass": median(rel_both_gates_pass),
         "p90_relative_error_effective": percentile(rel_effective, 0.90),
         "status_counts": dict(sorted(status_counts.items())),
         "mask_qc_counts": dict(sorted(qc_counts.items())),
@@ -691,12 +633,14 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     overlap = discard_overlap_summary(rows)
     return {
         "n_results": len(rows),
-        "n_physics_valid_or_weak": sum(1 for r in rows if r["physics_valid"]),
+        "n_both_gates_pass": sum(1 for r in rows if r["both_gates_pass"]),
+        "n_physics_status_pass": sum(1 for r in rows if r["physics_status_pass"]),
         "n_tracking_quality_pass": sum(1 for r in rows if r["tracking_quality_pass"]),
         "n_mask_qc_pass": sum(1 for r in rows if r["mask_qc_pass"]),
         "n_measurement_quality_pass": sum(1 for r in rows if r["measurement_quality_status"] == "pass"),
         "n_effective_for_score": sum(1 for r in rows if r["effective_for_score"]),
-        "physics_valid_rate": sum(1 for r in rows if r["physics_valid"]) / max(len(rows), 1),
+        "both_gates_pass_rate": sum(1 for r in rows if r["both_gates_pass"]) / max(len(rows), 1),
+        "physics_status_pass_rate": sum(1 for r in rows if r["physics_status_pass"]) / max(len(rows), 1),
         "tracking_quality_pass_rate": sum(1 for r in rows if r["tracking_quality_pass"]) / max(len(rows), 1),
         "mask_qc_pass_rate": sum(1 for r in rows if r["mask_qc_pass"]) / max(len(rows), 1),
         "measurement_quality_pass_rate": sum(1 for r in rows if r["measurement_quality_status"] == "pass") / max(len(rows), 1),
@@ -818,17 +762,18 @@ def plot_reports(out_dir: Path, rows: list[dict[str, Any]], summary: dict[str, A
         fig, ax = plt.subplots(figsize=(max(8, 0.9 * len(metrics)), 4))
         x = list(range(len(metrics)))
         for offset, key, label in [
-            (-0.27, "physics_valid_rate", "physics valid"),
-            (0.0, "tracking_quality_pass_rate", "tracking pass"),
-            (0.27, "effective_video_rate", "effective"),
+            (-0.30, "physics_status_pass_rate", "physics status pass"),
+            (-0.10, "tracking_quality_pass_rate", "tracking pass"),
+            (0.10, "both_gates_pass_rate", "both gates pass"),
+            (0.30, "effective_video_rate", "effective"),
         ]:
             ax.bar([i + offset for i in x], [m[key] * 100 for m in summary["metrics"]],
-                   width=0.25, label=label)
+                   width=0.18, label=label)
         ax.set_xticks(x)
         ax.set_xticklabels(metrics, rotation=35, ha="right")
         ax.set_ylim(0, 100)
         ax.set_ylabel("rate (%)")
-        ax.set_title("Validity and tracking rates by metric")
+        ax.set_title("Gate pass and effective-video rates by metric")
         ax.legend(loc="best")
         fig.tight_layout()
         fig.savefig(plots_dir / "metric_rates.png", dpi=150)
@@ -837,13 +782,44 @@ def plot_reports(out_dir: Path, rows: list[dict[str, Any]], summary: dict[str, A
     plot_discard_overlap(plots_dir, summary)
 
 
+def check_completeness(paths, metadata, metric=None):
+    import re
+    def canonical(value):
+        match = re.search(r"(?:^|[_-])([A-Z]+\d{3})$", str(value))
+        return match.group(1) if match else str(value)
+    actual = []
+    for path in paths:
+        result = load_json(path)
+        actual.append(canonical((result.get("metadata") or {}).get("Prompt_ID") or prompt_id(result, path)))
+    counts = Counter(actual)
+    if str(metadata).lower() == "none":
+        expected = set(actual)
+        scope = "explicit_custom_scope"
+    else:
+        path = Path(metadata)
+        if path.suffix.lower() == ".csv":
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                records = list(csv.DictReader(handle))
+        else:
+            import pandas as pd
+            records = pd.read_excel(path).to_dict("records")
+        expected_list = [canonical(row["Prompt_ID"]) for row in records if metric is None or str(row["Metric"]) == metric]
+        if len(expected_list) != len(set(expected_list)):
+            raise ValueError("Metadata contains duplicate Prompt_ID values")
+        expected = set(expected_list)
+        scope = "metadata_verified"
+    return {"n_expected": len(expected), "n_present": len(actual), "scope": scope,
+            "missing_ids": sorted(expected-set(actual)), "unexpected_ids": sorted(set(actual)-expected),
+            "duplicate_ids": sorted(k for k,v in counts.items() if v>1)}
+
+
 def main() -> None:
     args = parse_args()
     result_root = Path(args.result_root).expanduser().resolve()
     out_dir = (
         Path(args.output_dir).expanduser().resolve()
         if args.output_dir
-        else result_root / "score_reports" / (args.metric if args.metric else "all_metrics")
+        else result_root / "score_reports" / args.qmask_protocol["protocol_id"] / (args.metric if args.metric else "all_metrics")
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -853,12 +829,25 @@ def main() -> None:
         raise SystemExit(f"No result.json files found under {result_root}")
 
     rows = [score_one(path, tolerances, args) for path in result_files]
+    unavailable = [row for row in rows if not row["score_available"]]
+    if unavailable:
+        (out_dir / "incomplete_report.json").write_text(json.dumps({"status": "incomplete", "unavailable": unavailable}, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise SystemExit(f"Refusing formal scores: {len(unavailable)} results have unavailable quality/physical evidence; see incomplete_report.json")
+    completeness = check_completeness(result_files, args.metadata, args.metric)
+    if completeness["missing_ids"] or completeness["unexpected_ids"] or completeness["duplicate_ids"]:
+        (out_dir / "incomplete_report.json").write_text(json.dumps(completeness, indent=2), encoding="utf-8")
+        raise SystemExit("Result set does not match metadata; see incomplete_report.json")
     summary = summarize(rows)
+    summary.update(completeness)
+    summary["n_score_available"] = sum(row["score_available"] for row in rows)
+    summary["n_score_unavailable"] = 0
     effective_mask_policy = "hard_fail" if args.strict_qc else args.mask_policy
     payload = {
         "model_name": args.model_name or result_root.name,
         "result_root": str(result_root),
         "scoring": {
+            "qmask_protocol": args.qmask_protocol,
+            "qmask_protocol_hash": protocol_hash(args.qmask_protocol),
             "valid_video_rule": (
                 "The scorer applies gates in order: tracking quality first, then physics status. "
                 "If tracking fails under the selected policy, the video is excluded and later scoring steps are skipped. "
@@ -879,11 +868,13 @@ def main() -> None:
             "weak_valid_multiplier": args.weak_valid_multiplier,
             "mask_policy": effective_mask_policy,
             "qc_flag_multiplier": 0.0 if effective_mask_policy == "hard_fail" else args.qc_flag_multiplier,
-            "mask_score_thresholds": MASK_SCORE_THRESHOLDS,
+            "mask_score_thresholds": args.qmask_protocol["components"],
+            "mask_score_gamma": args.qmask_protocol["gamma"],
             "tracking_policy": args.tracking_policy,
             "quality_flag_multiplier": 0.0 if args.tracking_policy == "hard_fail" else args.quality_flag_multiplier,
             "min_motion_extent_ratio": args.min_motion_extent_ratio,
             "min_object_coverage": args.min_object_coverage,
+            "tracking_quality_recomputed": args.recompute_tracking_quality,
             "tolerances": tolerances,
         },
         "summary": summary,

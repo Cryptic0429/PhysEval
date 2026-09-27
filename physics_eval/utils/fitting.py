@@ -93,6 +93,7 @@ def fit_slope_window(t: np.ndarray, s: np.ndarray, start: int, end: int) -> tupl
 
 
 def estimate_period(t: np.ndarray, s: np.ndarray) -> tuple[float, float, str]:
+    """Return the historical period, confidence heuristic, and detector source."""
     t = np.asarray(t, dtype=float)
     s = np.asarray(s, dtype=float)
     if len(t) < 8:

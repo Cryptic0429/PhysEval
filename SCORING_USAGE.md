@@ -1,6 +1,44 @@
 # Scoring Compact Batch Results
 
-This document explains how to score compact per-video results produced by:
+## Qmask protocol
+
+The default and selected Qmask protocol is `grouped_v2_candidate`: gamma=1,
+three equally weighted groups, and an average across required objects. Centroid
+jumps remain diagnostic only. Qmask is a heuristic quality weight, not a
+probability of correct tracking; grouped scoring can let strong components
+compensate a weak component.
+
+```bash
+python physeval.py score --result-root path/to/model/results --scoring-protocol grouped_v2_candidate --no-plots
+```
+
+New reports use `score_reports/<protocol_id>/<scope>/`; older saved reports are
+unchanged. Reports include the resolved protocol and SHA256 fingerprint, per-object
+component/group scores, and expected/present/effective/scorable sample counts.
+The scorer checks result IDs against benchmark metadata by default. Pass
+`--metadata custom.csv` for another benchmark, or explicitly use `--metadata none`
+for a partial exploratory scope. The selected protocol requires all diagnostic
+components and all required objects; missing evidence produces `score_unavailable`.
+The CLI writes `incomplete_report.json` and refuses a formal aggregate until evidence
+is complete. A measured zero Qmask still does not change the effective set.
+
+Run the selected protocol's synthetic sanity checks and grouped-protocol sensitivity analysis without editing input results:
+
+```bash
+python scripts/validate_qmask_synthetic.py --output ../outputs/grouped_qmask_synthetic.csv
+python scripts/analyze_scoring_sensitivity.py --output-dir ../outputs/scoring_sensitivity_new
+python physics_eval/tests/test_qmask_protocols.py -v
+```
+
+Use a fresh analysis output directory. The analysis freezes candidate configurations
+before scoring, records input hashes, verifies unchanged physics/effective sets,
+and lists cases where a zero component is compensated by a high aggregate.
+An optional `--baseline-scorer` points to a frozen pre-refactor script for direct
+regression checking. Tests use the standard-library unittest runner.
+
+See the [project adjustment log](../docs/CHANGELOG_zh-CN.md) for design, results, and limitations.
+
+This document explains how the executable scorer maps compact per-video results to the quantities reported in the PhysEval paper: effective-video score, discard diagnostics, and supplementary end-to-end score.
 
 ```bash
 python scripts/run_batch_simple.py
@@ -12,15 +50,20 @@ The scoring script reads:
 batch_eval_results/<metric>/<prompt_id>/result.json
 ```
 
-and writes model-level / metric-level score reports.
+and writes model-level and metric-level score reports.
+
+> **Paper/code compatibility:** the CLI default for the `weak_valid` estimation-validity multiplier is `0.8`, matching the paper protocol. Commands may still pass it explicitly for reproducibility or override it for sensitivity analyses.
 
 ## Basic Command
 
-Score all metrics under `batch_eval_results`:
+Score all metrics under `batch_eval_results` with the paper-aligned protocol:
 
 ```bash
 cd /path/to/workspace
-python scripts/score_results.py --result-root batch_eval_results --model-name my_model
+python scripts/score_results.py \
+  --result-root batch_eval_results \
+  --model-name my_model \
+  --weak-valid-multiplier 0.8
 ```
 
 Run with a more relaxed score scale:
@@ -41,13 +84,14 @@ Score one metric only:
 python scripts/score_results.py \
   --result-root batch_eval_results \
   --metric friction \
-  --model-name my_model
+  --model-name my_model \
+  --weak-valid-multiplier 0.8
 ```
 
 Default outputs:
 
 ```text
-batch_eval_results/score_reports/all_metrics/
+batch_eval_results/score_reports/grouped_v2_candidate/all_metrics/
   score_summary.json
   metric_scores.csv
   per_video_scores.csv
@@ -55,12 +99,13 @@ batch_eval_results/score_reports/all_metrics/
   plots/
     metric_scores.png
     metric_rates.png
+    discard_overlap_overall.png
 ```
 
 For one metric, outputs go to:
 
 ```text
-batch_eval_results/score_reports/<metric>/
+batch_eval_results/score_reports/grouped_v2_candidate/<metric>/
 ```
 
 ## Score Formula
@@ -81,7 +126,7 @@ physical_accuracy_score = 100 * exp(-relative_error / tau)
 
 `tau` is the tolerance for that metric. Smaller `tau` makes the score stricter.
 
-Default tolerances are intentionally relaxed from the earlier draft. Low original values are increased by `0.10`; higher original values are increased by `0.05`:
+The paper uses intentionally moderate metric-specific tolerances because generated videos contain scale, timing, and tracking noise:
 
 ```text
 velocity                       0.30
@@ -142,6 +187,18 @@ measurement_quality_multiplier = tracking_quality_multiplier * mask_quality_scor
 estimation_validity_multiplier = status multiplier from the evaluator
 ```
 
+In the paper's notation, these terms are:
+
+```text
+M_track   = tracking_quality_multiplier
+Q_mask    = mask_quality_score
+M_measure = M_track * Q_mask
+M_valid   = estimation_validity_multiplier
+S_video   = S_phys * M_valid * M_measure
+```
+
+Tracking and physics validity define whether a video enters the effective set. `Q_mask` is computed after those two hard gates pass and is a soft reliability term under the default paper protocol.
+
 ## Measurement Quality
 
 Tracking and mask checks are grouped as Measurement Quality.
@@ -161,24 +218,18 @@ mask_quality_score in [0, 1]
 0 = severe mask instability
 ```
 
-The default mapping is intentionally lenient. Mild mask variation stays close to `1`, while only severe instability is pushed close to `0`. This makes the score behave more like a reliability gate: most normal videos keep almost full credit, and a small number of clearly problematic videos receive strong penalties.
-
-The mask score is computed from the worst mask-stability component among:
+The score is computed by averaging components within three groups, then taking
+the equally weighted mean of the group scores:
 
 ```text
-area_ratio_p95_p05
-area_cv
-bbox_width_cv
-bbox_height_cv
-bbox_aspect_cv
-max_log_jump
-trend_scale_ratio
-max_centroid_step_norm_by_diameter
-translation_aligned_iou_median
-middle_coverage
+shape and scale (7): area ratio, area CV, bbox width/height/aspect CV,
+                     log-area jump, long-term scale trend
+segmentation consistency (1): translation-aligned IoU median
+local completeness (1): middle-window mask coverage
 ```
 
-For example, high `area_cv`, high `area_ratio_p95_p05`, large log-area jumps, or low aligned IoU reduce the mask score gradually rather than using a single `pass/flagged` penalty.
+Centroid jumps are saved as diagnostics and do not enter Qmask. Qmask is a
+continuous multiplier; a score of zero does not by itself change eligibility.
 
 Current relaxed mask thresholds:
 
@@ -189,7 +240,6 @@ bbox_width_cv / bbox_height_cv  good <= 0.20, bad >= 0.60
 bbox_aspect_cv                  good <= 0.20, bad >= 0.60
 max_log_jump                    good <= 0.45, bad >= 1.20
 trend_scale_ratio               good <= 1.60, bad >= 3.00
-max_centroid_step_norm          good <= 2.50, bad >= 5.00
 translation_aligned_iou_median  good >= 0.65, bad <= 0.30
 middle_coverage                 good >= 0.70, bad <= 0.50
 ```
@@ -208,7 +258,7 @@ python scripts/score_results.py --strict-qc
 
 ## Estimation Validity
 
-The evaluator status adjusts the score:
+The evaluator status adjusts the score. The paper protocol is:
 
 ```text
 valid       multiplier 1.0
@@ -216,6 +266,8 @@ weak_valid  multiplier 0.8
 invalid     multiplier 0.0
 failed      multiplier 0.0
 ```
+
+The CLI default for `weak_valid` is `0.8`, matching the paper protocol. Use `--weak-valid-multiplier` only when an explicit alternative is required for sensitivity analysis.
 
 This layer answers whether the physical evaluator successfully produced a trustworthy measured value.
 Tracking completeness, object count, and meaningful-motion checks are handled by the Tracking Quality layer, not by the physics evaluator status. Physics status is reserved for fit quality, event detection, calibration/scale availability, and metric-specific measurement validity.
@@ -263,7 +315,7 @@ Final adjusted score:
 adjusted_score = physical_accuracy_score * estimation_validity_multiplier * measurement_quality_multiplier
 ```
 
-To change only the `weak_valid` multiplier:
+To select the paper's `weak_valid` multiplier explicitly:
 
 ```bash
 python scripts/score_results.py --weak-valid-multiplier 0.8
@@ -348,7 +400,7 @@ tracking_quality_multiplier = 0.0
 
 So the adjusted score becomes zero even if a numerical fit was produced.
 
-## Valid-Only vs End-to-End
+## Effective-Video, Discard, and End-to-End Results
 
 The script reports two score families.
 
@@ -358,7 +410,7 @@ The script reports two score families.
 Mean adjusted score over effective videos.
 ```
 
-This answers:
+This is the paper's primary physical-accuracy result. It answers:
 
 ```text
 When the video is valid and trackable under the protocol, how physically accurate is it?
@@ -370,13 +422,19 @@ When the video is valid and trackable under the protocol, how physically accurat
 Mean adjusted score over all videos, with invalid/failed videos counted as zero.
 ```
 
-This answers:
+This is a supplementary score because it mixes measurability with physical accuracy. It answers:
 
 ```text
 How reliably does the model produce videos that are both measurable and physically correct?
 ```
 
-For model comparison, report both.
+The paper also reports discard rate as the primary measurability diagnostic:
+
+```text
+discard_rate = 1 - n_effective_for_score / n_total
+```
+
+The scorer additionally splits discarded samples into `tracking_only`, `physics_only`, and `both_tracking_and_physics`. For model comparison, report effective-video score together with discard rate; use end-to-end score as supplementary context.
 
 ## Simple Examples
 
@@ -400,7 +458,7 @@ adjusted_score = 71.65 * 1.0 * 1.0 * 1.0 = 71.65
 effective_for_score = true
 ```
 
-Example 2: weak valid video with moderately unstable mask:
+Example 2: weak valid video with moderately unstable mask, using the paper multiplier:
 
 ```text
 status = weak_valid             -> 0.8
@@ -431,34 +489,32 @@ effective_for_score = false
 
 ## Suggested Tables and Figures
 
-### Table 1: Overall Model Score Table
+### Table 1: Main Physical-Accuracy and Measurability Table
 
 Columns:
 
 ```text
 Model
-Overall valid-only score
-Overall end-to-end score
-Valid rate
-QC pass rate
-Mean mask quality
+Overall effective-video score
+Discard rate
+Tracking-only discard rate
+Physics-only discard rate
+Both-gates discard rate
 Median relative error
 ```
 
 Meaning:
 
 ```text
-This is the main leaderboard. It separates physical accuracy on measurable videos from end-to-end robustness.
+This is the recommended main table. It keeps physical accuracy on measurable videos separate from the probability that a model produces a measurable video.
 ```
 
 How it is computed:
 
 ```text
-Overall valid-only score = average of per-metric valid_only_score
-Overall end-to-end score = average of per-metric end_to_end_score
-Valid rate = valid_or_weak / total
-QC pass rate = strict mask pass / total
-Mean mask quality = average continuous mask_quality_score
+Overall effective-video score = average of per-metric effective_video_score
+Discard rate = 1 - effective videos / total videos
+Tracking-only / physics-only / both-gates rates = discard_overlap_rates
 Median relative error = median over valid/weak_valid videos
 ```
 
@@ -503,7 +559,7 @@ plots/metric_scores.png
 Meaning:
 
 ```text
-Compares effective-only and end-to-end score for each metric.
+Compares the primary effective-video score with the supplementary end-to-end score for each metric.
 ```
 
 Interpretation:
@@ -523,7 +579,21 @@ plots/metric_rates.png
 Meaning:
 
 ```text
-Compares physics-valid rate, tracking-pass rate, and final effective-video rate for each metric.
+Compares the independent physics-status pass rate, tracking-pass rate, joint both-gates pass rate, and final effective-video rate for each metric.
+```
+
+### Figure 3: Discard Diagnostic Overlap
+
+File:
+
+```text
+plots/discard_overlap_overall.png
+```
+
+Meaning:
+
+```text
+Separates discarded videos into tracking-only failures, physics-only failures, and failures of both hard gates, matching the paper's measurability analysis.
 ```
 
 ### Optional Figure 5: Per-Video Failure Case Grid
@@ -573,7 +643,8 @@ tau
 base_score
 raw_score
 status
-physics_valid
+physics_status_pass
+both_gates_pass
 status_multiplier
 estimation_validity_multiplier
 mask_qc_status
@@ -623,3 +694,11 @@ overall leaderboard table
 model-by-metric heatmap
 failure-mode comparison table
 ```
+# Optional spring period confidence diagnostics
+
+The spring estimator remains unchanged by default. `period_confidence_v3_candidate` is an
+optional diagnostic that retains the existing T/k and effective membership while adjusting
+the existing 1.0/0.8 weight. See the [project adjustment log](../docs/CHANGELOG_zh-CN.md).
+
+
+For the consolidated implementation history and current optional spring/Qmask protocols, see [CHANGELOG_zh-CN.md](CHANGELOG_zh-CN.md).
