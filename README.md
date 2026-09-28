@@ -1,6 +1,6 @@
 # PhysEval
 
-[English](README.md) | [简体中文使用指南](QUICKSTART_zh-CN.md)
+[English](README.md) | [简体中文](README_zh-CN.md)
 
 **Quantifying the gap between video generation and physical laws.**
 
@@ -64,6 +64,7 @@ This release does not establish full 3D physical correctness. Depth drift, camer
 - `requirements-compare.txt`: opt-in comparison dependencies, including the base requirements.
 - [`BATCH_USAGE.md`](BATCH_USAGE.md): complete batch-running and troubleshooting guide.
 - [`SCORING_USAGE.md`](SCORING_USAGE.md): paper-aligned scoring and report interpretation.
+- `configs/scoring/`: versioned mask-quality scoring protocols used by the scorer.
 
 Generated videos, SAM2 source/checkpoints, YOLO weights, and batch outputs are
 not included in this code repository. Supply videos locally when running an
@@ -110,7 +111,7 @@ pip install -e repo/sam2
 
 ## Quick Start
 
-Run the commands below from this directory (`cd PhysEval-main` from the workspace root).
+Run the commands below from the repository root.
 
 Generate one video for every prompt in `benchmark/metadata/phys_t2v_bench_prompts.xlsx`. Name each video according to the `Video_File` column in the metadata workbook and place all videos for one model under:
 
@@ -152,6 +153,32 @@ batch_eval_results/<model_name>/score_reports/grouped_v2_candidate/all_metrics/
 
 For detailed commands, reuse modes, output layouts, and diagnostics, continue with [`BATCH_USAGE.md`](BATCH_USAGE.md).
 
+### Scoring protocol and outputs
+
+The default scoring protocol is `grouped_v2_candidate`, defined in
+[`configs/scoring/grouped_v2_candidate.json`](configs/scoring/grouped_v2_candidate.json).
+It combines mask-quality evidence in three equally weighted groups and averages
+across required objects. Missing evidence makes a score unavailable; it is not
+filled in with a perfect score. `legacy_v1.json` remains available for explicitly
+reproducing older scoring behavior and is not the default.
+
+The per-video score combines physical accuracy, measurement quality, and
+estimation validity:
+
+```text
+final_score = physical_accuracy_score
+              × measurement_quality_multiplier
+              × estimation_validity_multiplier
+```
+
+The physical-accuracy term converts relative error to a metric-specific score.
+Tracking and physics-validity gates determine whether a video enters the
+effective set; a low but measured Qmask does not by itself remove it. The default
+`weak_valid` multiplier is `0.8`, matching the paper protocol. Reports are written
+under `score_reports/<protocol_id>/<scope>/` and include model and metric summaries,
+per-video scores, and exclusion reasons. See [`SCORING_USAGE.md`](SCORING_USAGE.md)
+for formula details, status rules, and report fields.
+
 ## Optional: detector/tracker comparison
 
 Qmask scoring is shared and versioned. The default is `grouped_v2_candidate`,
@@ -180,8 +207,3 @@ The original `scripts/run_batch_simple.py`, `scripts/score_results.py`, and
 `compare/scripts/` entry points remain available. All script locations and
 default asset paths are resolved from the checkout, so the outer
 directory may be renamed after cloning.
-
-
-## Project changes
-
-See [CHANGELOG_zh-CN.md](CHANGELOG_zh-CN.md) for the implementation history, protocol status, verification results, and remaining work.

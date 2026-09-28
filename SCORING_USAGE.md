@@ -36,8 +36,6 @@ and lists cases where a zero component is compensated by a high aggregate.
 An optional `--baseline-scorer` points to a frozen pre-refactor script for direct
 regression checking. Tests use the standard-library unittest runner.
 
-See the [project adjustment log](CHANGELOG_zh-CN.md) for design, results, and limitations.
-
 This document explains how the executable scorer maps compact per-video results to the quantities reported in the PhysEval paper: effective-video score, discard diagnostics, and supplementary end-to-end score.
 
 ```bash
@@ -698,7 +696,4 @@ failure-mode comparison table
 
 The spring estimator remains unchanged by default. `period_confidence_v3_candidate` is an
 optional diagnostic that retains the existing T/k and effective membership while adjusting
-the existing 1.0/0.8 weight. See the [project adjustment log](CHANGELOG_zh-CN.md).
-
-
-For the consolidated implementation history and current optional spring/Qmask protocols, see [CHANGELOG_zh-CN.md](CHANGELOG_zh-CN.md).
+the existing 1.0/0.8 weight.

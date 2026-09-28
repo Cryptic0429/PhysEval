@@ -8,6 +8,7 @@ batch_eval_results/
 runs/
 sam2_tracks/
 tmp/
+/AGENTS.md
 
 # Third-party code and large model checkpoints
 repo/

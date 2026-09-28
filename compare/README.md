@@ -36,7 +36,7 @@ prevents detector variation from being attributed to SAM2 versus TAM.
 ## Directory layout
 
 ```text
-PhysEval-main/
+repository-root/
   physeval.py             unified entry point (compare is opt-in)
   benchmark/metadata/    shared benchmark metadata
   data/t2v_videos/        shared local video inputs (ignored)
@@ -66,7 +66,7 @@ video under `--video-root` and treats each as a one-object tracking-only sample.
 
 ## Environment
 
-All commands below run from `PhysEval-main/`. Standard evaluation only needs
+All commands below run from the repository root. Standard evaluation only needs
 `requirements.txt`; neither `eval` nor `score` imports this module. Install the
 extra dependencies below only when using the explicit `compare` entry point.
 YOLO and SAM2 assets are shared with the core pipeline under the main project
@@ -78,7 +78,7 @@ server, install a compatible PyTorch wheel that matches the CUDA driver first,
 then install the remaining packages:
 
 ```bash
-cd PhysEval-main
+cd PhysEval
 python -m venv .venv
 source .venv/bin/activate
 
