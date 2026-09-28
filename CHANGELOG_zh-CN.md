@@ -8,9 +8,9 @@
 
 | 位置 | 已做调整 |
 | --- | --- |
-| 根目录 `README.md`、`docs/README.md` | 整理项目导航，明确代码、数据、历史结果、验证材料和文档的职责。 |
+| 发布仓库 `README.md`、本地工作区 `docs/README.md` | 整理项目导航，明确代码、数据、历史结果、验证材料和文档的职责。 |
 | `benchmark/metadata/` | 集中提示词/评测工作簿和 CSV 导出，补充规模、字段、单位、任务划分及中英文说明。 |
-| `docs/manuscript/`、`docs/references/`、`docs/rebuttal/` | 分别组织论文、相关工作和审稿记录；当前审稿材料集中为 `DECISION_AND_REVIEWS.md`，移除重复答复草稿及过程性材料。 |
+| 本地工作区 `docs/manuscript/`、`docs/references/`、`docs/rebuttal/` | 分别组织论文、相关工作和审稿记录；当前审稿材料集中为 `DECISION_AND_REVIEWS.md`，移除重复答复草稿及过程性材料。 |
 | `scripts/` | 删除 11 个一次性 rebuttal/补充实验分析脚本；保留主跟踪、物理评估、评分入口及已有实验产物。删除清单见下。 |
 | `physeval-compare/` → `compare/` | 将对比模块、脚本、测试及历史对比报告迁入主项目，可在同一 GitHub 仓库分发。 |
 | `physeval.py` | 新增统一入口：`eval`、`score`、`compare`、`compare-summary`；仅显式调用对比命令时加载 compare。 |
@@ -32,7 +32,7 @@ rebuttal_sensitivity.py               summarize_tracking_threshold_sensitivity.p
 
 ## 2. Qmask 与 compare 数据一致性
 
-以下路径相对 ``。
+以下路径相对仓库根目录。
 
 | 位置 | 已做调整 |
 | --- | --- |
@@ -52,7 +52,7 @@ rebuttal_sensitivity.py               summarize_tracking_threshold_sensitivity.p
 
 ## 3. 弹簧周期：固定周期质量诊断与当前实现
 
-以下路径相对 ``。
+以下路径相对仓库根目录。
 
 | 位置 | 已做调整 |
 | --- | --- |

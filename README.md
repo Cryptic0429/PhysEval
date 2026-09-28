@@ -65,7 +65,9 @@ This release does not establish full 3D physical correctness. Depth drift, camer
 - [`BATCH_USAGE.md`](BATCH_USAGE.md): complete batch-running and troubleshooting guide.
 - [`SCORING_USAGE.md`](SCORING_USAGE.md): paper-aligned scoring and report interpretation.
 
-Generated videos, SAM2 source/checkpoints, YOLO weights, and batch outputs are not included because they are large or machine-specific.
+Generated videos, SAM2 source/checkpoints, YOLO weights, and batch outputs are
+not included in this code repository. Supply videos locally when running an
+evaluation.
 
 ## Installation
 
