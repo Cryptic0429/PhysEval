@@ -143,7 +143,7 @@ python physeval.py score \
 The principal outputs are:
 
 ```text
-batch_eval_results/<model_name>/score_reports/grouped_v2_candidate/all_metrics/
+batch_eval_results/<model_name>/score_reports/<protocol_id>/all_metrics/
   score_summary.json
   metric_scores.csv
   per_video_scores.csv
@@ -155,12 +155,11 @@ For detailed commands, reuse modes, output layouts, and diagnostics, continue wi
 
 ### Scoring protocol and outputs
 
-The default scoring protocol is `grouped_v2_candidate`, defined in
-[`configs/scoring/grouped_v2_candidate.json`](configs/scoring/grouped_v2_candidate.json).
-It combines mask-quality evidence in three equally weighted groups and averages
-across required objects. Missing evidence makes a score unavailable; it is not
-filled in with a perfect score. `legacy_v1.json` remains available for explicitly
-reproducing older scoring behavior and is not the default.
+The default method combines mask-quality evidence in three equally weighted
+groups and averages across required objects. Missing evidence makes a score
+unavailable; it is not filled in with a perfect score. Older scoring behavior
+can be selected explicitly for reproduction. See [`SCORING_USAGE.md`](SCORING_USAGE.md)
+for the protocol options and implementation details.
 
 The per-video score combines physical accuracy, measurement quality, and
 estimation validity:
@@ -181,8 +180,8 @@ for formula details, status rules, and report fields.
 
 ## Optional: detector/tracker comparison
 
-Qmask scoring is shared and versioned. The default is `grouped_v2_candidate`,
-with three equally weighted quality groups. See [scoring usage](SCORING_USAGE.md)
+Qmask scoring is shared between core evaluation and comparison, with three
+equally weighted quality groups by default. See [scoring usage](SCORING_USAGE.md)
 for the formula, completeness checks, and offline sensitivity-analysis command.
 
 The core `eval` and `score` commands do not import the comparison package or require
