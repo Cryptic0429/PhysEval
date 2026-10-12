@@ -32,11 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-diagnostics", action="store_true", help="Save normalized tracks and plots")
     parser.add_argument("--fps", type=float, default=None, help="Fallback fps if tracking JSON has no fps/time")
     parser.add_argument("--strict", action="store_true", help="Mark weak/invalid quality as invalid")
-    parser.add_argument("--spring-period-protocol", choices=["legacy_v1", "period_confidence_v3_candidate"], default="legacy_v1")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    if args.strict and args.spring_period_protocol == "period_confidence_v3_candidate":
-        parser.error("--strict conflicts with the eligibility-preserving spring protocol")
     return args
 
 
@@ -91,10 +88,7 @@ def process_row(
     fps: float | None,
     save_diag: bool,
     strict: bool,
-    spring_period_protocol: str = "legacy_v1",
 ) -> dict[str, Any]:
-    if strict and spring_period_protocol == "period_confidence_v3_candidate":
-        raise ValueError("--strict conflicts with the eligibility-preserving spring protocol")
     evaluator_name = str(row.get("Evaluator") or "")
     evaluator = EVALUATOR_REGISTRY.get(evaluator_name)
     if evaluator is None:
@@ -103,8 +97,7 @@ def process_row(
     try:
         json_path = resolve_tracking_json(row, metadata_path, json_root)
         tracking_df = normalize_tracking_json(json_path, fps_override=fps)
-        result = (evaluator(tracking_df, row, period_protocol=spring_period_protocol)
-                  if evaluator_name == "eval_spring" else evaluator(tracking_df, row))
+        result = evaluator(tracking_df, row)
         result["Tracking_JSON"] = str(json_path)
         if strict and result.get("Status") in {"weak_valid", "invalid"}:
             result["Status"] = "invalid"
@@ -142,7 +135,6 @@ def main() -> None:
             fps=args.fps,
             save_diag=args.save_diagnostics,
             strict=args.strict,
-            spring_period_protocol=args.spring_period_protocol,
         )
         results.append(result)
 

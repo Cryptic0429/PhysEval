@@ -1,4 +1,4 @@
-"""One-factor sensitivity on saved evidence, with grouped Qmask and spring v3 fixed.
+"""One-factor sensitivity on saved evidence, with grouped Qmask fixed.
 
 Never modifies input results or changes the production default. Every scenario
 uses the production scorer; physical R2 cutoffs apply only to its four consumers.
@@ -76,7 +76,6 @@ def reversed_pairs(a, b):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, default=ROOT.parent / "results")
-    parser.add_argument("--spring-results", type=Path, default=ROOT.parent / "outputs/spring_period_review/2026-09-26/confidence_only_v3/candidate_results")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     out = args.output_dir.resolve()
@@ -84,7 +83,7 @@ def main():
         raise SystemExit("Use a fresh output directory; existing analyses are immutable")
     out.mkdir(parents=True, exist_ok=True)
     protocol = load_protocol("grouped_v2_candidate")
-    design = dict(qmask=protocol, qmask_hash=protocol_hash(protocol), spring="period_confidence_v3_candidate",
+    design = dict(qmask=protocol, qmask_hash=protocol_hash(protocol), spring_confidence_threshold=0.20,
                   r2_metrics=sorted(AFFECTED), scenarios=scenarios(),
                   aggregation="metric macro average via production scorer; empty effective cells excluded from effective macro",
                   design="one factor at a time; all other parameters fixed; no GPU retracking",
@@ -110,15 +109,14 @@ def main():
             value = json.loads(path.read_text(encoding="utf-8"))
             manifest.append(dict(path=str(path.resolve()), sha256=sha(path), role="original_result"))
             if value["metric"] == "spring_constant":
-                candidate = args.spring_results / path.relative_to(args.results_root)
-                overlay = json.loads(candidate.read_text(encoding="utf-8"))
-                manifest.append(dict(path=str(candidate.resolve()), sha256=sha(candidate), role="spring_v3_overlay"))
-                assert overlay["physics_extra"]["period_protocol"] == "period_confidence_v3_candidate"
-                assert overlay["mask_qc"] == value["mask_qc"] and overlay["tracking_quality"] == value["tracking_quality"]
-                for field in ("Measured_Value", "Measured_Unit", "Relative_Error", "Absolute_Error", "Target_Value"):
-                    assert overlay["physics_result"].get(field) == value["physics_result"].get(field), (path, field)
-                assert (overlay["physics_result"]["Status"] in scorer.PHYSICS_VALID_STATUSES) == (value["physics_result"]["Status"] in scorer.PHYSICS_VALID_STATUSES)
-                value = overlay
+                physics = value["physics_result"]
+                if physics["Status"] in scorer.PHYSICS_VALID_STATUSES:
+                    confidence = scorer.as_float(physics.get("Fit_R2"))
+                    if confidence is None:
+                        raise ValueError(f"Spring result missing period confidence: {path}")
+                    expected = "valid" if confidence >= 0.20 else "weak_valid"
+                    if physics["Status"] != expected:
+                        raise ValueError(f"Spring status inconsistent with period confidence: {path}")
                 spring_n += 1
             data[path] = value
     assert len(data) == 3000 and spring_n == 300 and len(paths_by_model) == 6
@@ -130,7 +128,7 @@ def main():
                    Path(defaults.metadata)):
         manifest.append(dict(path=str(source.resolve()), sha256=sha(source), role="code_config_or_metadata"))
     write_json(out / "input_manifest.json", manifest)
-    print(f"Loaded {len(data)} videos, {spring_n} spring v3 overlays; baseline R2 replay 1200/1200", flush=True)
+    print(f"Loaded {len(data)} videos, including {spring_n} spring results; baseline R2 replay 1200/1200", flush=True)
     old_loader = scorer.load_json
     current = dict(data)
     scorer.load_json = lambda p: current[p] if p in current else old_loader(p)
@@ -171,7 +169,6 @@ def main():
             metrics.extend(dict(**scenario, model=model, **m) for m in summary["metrics"])
         if baseline is None:
             baseline = path_rows
-            assert sum(r["effective_for_score"] for r in rows) == 1047
         for path, row in path_rows.items():
             before = baseline[path]
             assert row["measured_value"] == before["measured_value"]
@@ -262,9 +259,10 @@ def main():
     write_json(out / "summary.json", dict(baseline=base_summary, scenarios=global_rows, weight_crossings=crossings))
     unchanged = all(sha(Path(m["path"])) == m["sha256"] for m in manifest)
     assert unchanged
-    write_json(out / "verification.json", dict(n_inputs=len(data), n_spring_overlays=spring_n,
+    write_json(out / "verification.json", dict(n_inputs=len(data), n_spring_results=spring_n,
         n_scenarios=len(design["scenarios"]), n_scores=len(per_video), r2_baseline_status_replay=1200,
-        baseline_effective=1047, no_unavailable_scores=True, all_input_files_unchanged=unchanged,
+        baseline_effective=sum(r["effective_for_score"] for r in baseline.values()),
+        no_unavailable_scores=True, all_input_files_unchanged=unchanged,
         gamma_and_weight_effective_membership_preserved=True, weak_weight_affine_score_check=True,
         gamma_score_monotonicity_check=True, threshold_unaffected_metrics_exactly_preserved=True,
         baseline_repeated_scenarios_identical=True, independent_quality_calibration="not performed"))
@@ -275,72 +273,48 @@ def main():
 
 def make_report(out, summaries, metrics, global_rows, coefficients, crossings, common_summary):
     baseline = [r for r in summaries if r["family"] == "baseline"]
-    base_by_model = {r["model"]:r for r in baseline}
     base_global = next(r for r in global_rows if r["family"] == "baseline")
-    gamma_pct = [100*r["e2e_delta"]/base_by_model[r["model"]]["end_to_end_macro"] for r in summaries if r["family"] == "gamma"]
-    r2_global = [r for r in global_rows if r["family"] == "r2"]
-    local_weight_ranks = [r["effective_rho"] for r in global_rows if r["family"] == "weak_weight" and r["weak_weight"] >= .6]
-    local_pct_by_model = [max(abs(100*r["e2e_delta"]/b["end_to_end_macro"]) for r in summaries
-                             if r["model"] == model and r["family"] == "weak_weight" and r["weak_weight"] >= .6)
-                          for model,b in base_by_model.items()]
-    metric_base = {(r["model"],r["metric"]):r for r in metrics if r["family"] == "baseline"}
-    largest_metric = max((r for r in metrics if r["family"] == "r2"),
-        key=lambda r:abs(r["end_to_end_score"]-metric_base[(r["model"],r["metric"])]["end_to_end_score"]))
-    largest_delta = abs(largest_metric["end_to_end_score"]-metric_base[(largest_metric["model"],largest_metric["metric"])]["end_to_end_score"])
-    top_crossing = next(c["crossing_weight"] for c in crossings if c["score_type"] == "effective" and {c["model_a"],c["model_b"]} == {"jimeng","kling"})
-    lines = ["# 当前评分方案：γ、R² 状态阈值与弱有效权重敏感性", "",
-        "基准：grouped_v2_candidate（九项指标、三组等权、物体间平均、γ=1）+ 显式启用的 period_confidence_v3_candidate；weak_valid 权重=0.8，R² weak/valid 截断=0.65/0.85。Qmask 评分入口默认已采用 grouped_v2_candidate；弹簧默认估计器仍为 legacy_v1。",
-        "使用六模型各500条、合计3,000条保存结果，其中300条弹簧采用已保存v3候选。仅重评分与状态重分类，未重跑视频生成、GPU跟踪或参数估计。每次仅改变一个因素。",
-        "分数单位为0–100。E2E将未通过门控的视频记0，再按十指标等权平均；有效宏平均按每指标有效样本均分后平均，无有效样本的指标按现有评分器排除，不能与E2E混用。", "",
-        "| 模型 | 有效数 | 弱有效数（有效集合内） | 有效宏平均 | E2E宏平均 |", "| --- | ---: | ---: | ---: | ---: |"]
+    model_order = [r["model"] for r in baseline]
+    lines = ["# 评分参数敏感性", "",
+        "基准：九项掩膜指标按三组等权聚合，γ=1；weak_valid权重=0.8，四项共享R²阈值为0.65/0.85。弹簧使用峰值或自相关周期估计，周期置信度达到0.20为valid，否则可测样本为weak_valid。",
+        "直接读取六模型各500条保存结果，保持物理测量与跟踪固定，每次仅改变一个评分因素。弹簧的周期置信度不套用共享R²阈值。",
+        "分数单位为0–100。E2E将未通过门控的样本记0，按十指标平均；条件宏平均只使用各指标的有效样本，排除无有效样本的指标。", "",
+        "| 模型 | 有效数 | 弱有效数 | 条件宏平均 | E2E宏平均 |",
+        "| --- | ---: | ---: | ---: | ---: |"]
     for r in baseline:
         lines.append(f"| {r['model']} | {r['n_effective']} | {r['n_weak_effective']} | {r['effective_macro']:.4f} | {r['end_to_end_macro']:.4f} |")
-    lines.extend(["", "## 主要发现", "",
-        "三组实验的全指标E2E排名均不变：jimeng > wan2.2 > HunyuanVideo > kling > CogVideoX-5b > wan2.1；其经验Spearman ρ均为1。有效宏平均排名存在参数敏感性，不能以E2E稳定替代条件排名稳定。",
-        f"γ从0.35到2时，有效宏平均前两名在jimeng/kling之间交换；相对γ=1，各模型E2E变化范围为{min(gamma_pct):+.2f}%至{max(gamma_pct):+.2f}%。",
-        f"R²九种设置下，全指标有效数为{min(r['n_effective'] for r in r2_global):,}–{max(r['n_effective'] for r in r2_global):,}，相对基准变化{100*(min(r['n_effective'] for r in r2_global)/base_global['n_effective']-1):+.2f}%至{100*(max(r['n_effective'] for r in r2_global)/base_global['n_effective']-1):+.2f}%；四个受影响指标有效数为{min(r['affected_n_effective'] for r in r2_global)}–{max(r['affected_n_effective'] for r in r2_global)}，基准为{base_global['affected_n_effective']}。单个模型指标E2E变化最大约{largest_delta:.2f}分，出现在{largest_metric['model']}的{largest_metric['metric']}；宏平均会稀释局部变化。",
-        f"weak_valid权重0.6–1.0时，各模型E2E相对基准最大变化约±{min(local_pct_by_model):.2f}%至±{max(local_pct_by_model):.2f}%；有效宏平均ρ为{min(local_weight_ranks):.3f}–{max(local_weight_ranks):.3f}。权重0.8时Kling/Jimeng有效宏平均为{base_by_model['kling']['effective_macro']:.4f}/{base_by_model['jimeng']['effective_macro']:.4f}，差仅{abs(base_by_model['kling']['effective_macro']-base_by_model['jimeng']['effective_macro']):.4f}分；交叉权重为{top_crossing:.6f}，不能宣称有效集合中的第一名对0.8的选择稳健。",
-        f"通过线性系数检查，[0,1]内E2E交叉点共{sum(c['score_type']=='e2e' for c in crossings)}个，有效宏平均交叉点共{sum(c['score_type']=='effective' for c in crossings)}个。稳定排名并不表示绝对得分对权重不敏感。"])
-    lines.extend(["", "## γ：固定聚合公式与所有门控", "",
-        "每个质量分量按 q=1−p^γ 计算，p为截断到[0,1]的归一化劣化程度。γ越大，对中间质量的惩罚越弱；达到好/坏边界的分量分数仍为1/0。γ不是指数物理误差分数的τ。所有设置有效数均为1,047。", ""])
-    model_order = [r["model"] for r in baseline]
-    lines.extend(["| γ | " + " | ".join(model_order) + " | E2E ρ | 有效 ρ |",
-                  "| --- | " + " | ".join(["---:"] * len(model_order)) + " | ---: | ---: |"])
-    for g in global_rows:
-        if g["family"] == "gamma":
-            vals = [next(r for r in summaries if r["scenario"] == g["scenario"] and r["model"] == m)["end_to_end_macro"] for m in model_order]
-            lines.append(f"| {g['gamma']:g} | " + " | ".join(f"{v:.4f}" for v in vals) + f" | {g['e2e_rho']:.3f} | {g['effective_rho']:.3f} |")
-    lines.extend(["", "## R²：四个共享阈值的指标", "",
-        "仅影响速度、加速度、重力、密度，共1,200条；其他指标（含弹簧v3的多条件质量规则）不套用此R²阈值。失败项保持失败，已存测量值及跟踪门控固定。基准状态回放1,200/1,200完全一致。", "",
-        "| weak | valid | valid / weak / invalid / failed（四指标） | 四指标有效数 | 全指标有效数 | 新入选 / 剔除 | E2E ρ（全指标） | E2E ρ（四指标） | 有效 ρ（全指标） |",
-        "| ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: |"])
-    for g in global_rows:
-        if g["family"] == "r2":
-            lines.append(f"| {g['weak_cutoff']:.2f} | {g['valid_cutoff']:.2f} | {g['affected_valid']} / {g['affected_weak_valid']} / {g['affected_invalid']} / {g['affected_failed']} | {g['affected_n_effective']} | {g['n_effective']} | {g['newly_effective']} / {g['no_longer_effective']} | {g['e2e_rho']:.3f} | {g['affected_e2e_rho']:.3f} | {g['effective_rho']:.3f} |")
-    lines.extend(["", "threshold_common_cohort.csv另报告九种阈值下共同有效的同视频集合，减少样本构成差异对条件均分的干扰；这不能消除生成失败带来的选择偏差。", "",
-        "## weak_valid：固定状态和有效集合", "",
-        "0.6–1.0为邻域/宽范围对照；0、0.2、0.4为弱有效贡献的压力测试。权重0仍保留原有效集合，只将弱有效贡献置零，与strict剔除不是同一个实验。所有设置有效数保持1,047。", "",
-        "| 弱有效权重 | " + " | ".join(model_order) + " | E2E ρ | 有效 ρ |",
-        "| --- | " + " | ".join(["---:"] * len(model_order)) + " | ---: | ---: |"])
-    for g in global_rows:
-        if g["family"] == "weak_weight":
-            vals = [next(r for r in summaries if r["scenario"] == g["scenario"] and r["model"] == m)["end_to_end_macro"] for m in model_order]
-            lines.append(f"| {g['weak_weight']:g} | " + " | ".join(f"{v:.4f}" for v in vals) + f" | {g['e2e_rho']:.3f} | {g['effective_rho']:.3f} |")
-    lines.extend(["", "固定集合下分数是权重w的线性函数：S(w)=A+B·w。精确交叉点如下（仅列[0,1]范围）：", "",
+    lines.extend(["", f"基准有效数：{base_global['n_effective']:,}。排名与分数变化均由本次输入计算。", ""])
+    for family, title in (("gamma", "γ：固定聚合公式和门控"),
+                           ("r2", "R²：速度、加速度、重力和密度"),
+                           ("weak_weight", "弱有效权重：固定状态与有效集合")):
+        rows = [r for r in global_rows if r["family"] == family]
+        lines.extend([f"## {title}", "",
+            "| 设置 | 全指标有效数 | E2E排名ρ | 条件排名ρ | E2E排名 | 条件排名 |",
+            "| --- | ---: | ---: | ---: | --- | --- |"])
+        for g in rows:
+            label = (f"γ={g['gamma']:g}" if family == "gamma" else
+                     f"w={g['weak_weight']:g}" if family == "weak_weight" else
+                     f"{g['weak_cutoff']:.2f}/{g['valid_cutoff']:.2f}")
+            lines.append(f"| {label} | {g['n_effective']} | {g['e2e_rho']:.3f} | {g['effective_rho']:.3f} | {g['e2e_order']} | {g['effective_order']} |")
+        lines.extend(["", "| 设置 | " + " | ".join(model_order) + " |",
+            "| --- | " + " | ".join(["---:"] * len(model_order)) + " |"])
+        for g in rows:
+            vals = [next(r for r in summaries if r["scenario"] == g["scenario"] and r["model"] == m)["effective_macro"] for m in model_order]
+            lines.append(f"| {g['scenario']} | " + " | ".join(f"{v:.4f}" for v in vals) + " |")
+        lines.extend(["", "上表为条件宏平均；E2E宏平均与相对基准的差值见model_summary.csv。", ""])
+    lines.extend(["## 权重交叉点", "",
+        "固定有效集合时，分数随弱有效权重满足S(w)=A+B·w。w=0保留资格，仅将弱有效贡献置零。以下列出[0,1]内由本次输入算出的交叉点。", "",
         "| 分数口径 | 模型对 | 交叉权重 |", "| --- | --- | ---: |"])
     for c in crossings:
         lines.append(f"| {c['score_type']} | {c['model_a']} / {c['model_b']} | {c['crossing_weight']:.6f} |")
-    lines.extend(["", "## 排名与解释", "",
-        "| 实验 | 参数 | E2E排名 | 有效排名 |", "| --- | --- | --- | --- |"])
-    for g in global_rows:
-        label = (f"γ={g['gamma']:g}" if g["family"] == "gamma" else f"w={g['weak_weight']:g}" if g["family"] == "weak_weight" else f"{g['weak_cutoff']:.2f}/{g['valid_cutoff']:.2f}" if g["family"] == "r2" else "基准")
-        lines.append(f"| {g['family']} | {label} | {g['e2e_order']} | {g['effective_order']} |")
-    lines.extend(["", "γ和权重导致的升分仅表示评分惩罚变化，不表示视频、跟踪或物理测量改善。R² weak截断改变入选集合，valid截断主要在valid/weak之间转移；条件有效均分的变化须结合N_eff和共同集合解释。",
-        "这些实验验证所列参数范围内的经验敏感性，不校准γ=1、R²=0.65/0.85或w=0.8的真值最优性，不测量固定prompt的生成种子方差。", "",
-        "产物：design.json预先保存参数；input_manifest.json保存输入与代码哈希；model_summary.csv、metric_summary.csv和per_video_sensitivity.csv保存全量结果；scenario_summary.csv保存状态计数和排名；verification.json保存不变量检查。",
-        "", "![E2E敏感性曲线](sensitivity_e2e.png)", "",
-        "![有效宏平均敏感性曲线](sensitivity_effective.png)", ""])
-    (out / "REPORT_zh-CN.md").write_text("\n".join(lines), encoding="utf-8")
+    if not crossings:
+        lines.append("| — | 无交叉点 | — |")
+    lines.extend(["", "## 解释与核验", "",
+        "γ与弱有效权重只改变评分惩罚，分数上升不表示视频、跟踪或物理测量改善。R²弱阈值改变有效集合，valid阈值主要改变valid/weak分配。threshold_common_cohort.csv单独报告共同有效样本，便于识别样本构成差异。",
+        "经验排名稳定不表示绝对得分不敏感；这些扫描不校准参数的真值最优性，也不测量固定提示的生成种子方差。",
+        "design.json保存参数；input_manifest.json保存输入和代码哈希；model_summary.csv、metric_summary.csv、per_video_sensitivity.csv与scenario_summary.csv保存完整结果；verification.json保存不变量检查。",
+        "所有输入只读，不覆盖原始结果。"])
+    (out / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def make_plot(out, summaries, global_rows):
@@ -371,7 +345,7 @@ def make_plot(out, summaries, global_rows):
         axes[2].set_xticks(WEAK_CUTOFFS)
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=9)
-        fig.suptitle("One factor at a time: grouped Qmask + spring confidence v3; 3,000 videos", fontsize=13)
+        fig.suptitle("One factor at a time: grouped Qmask; 3,000 videos", fontsize=13)
         fig.tight_layout(rect=(0,.09,1,.94))
         for suffix in ("png", "pdf", "svg"):
             fig.savefig(out / f"sensitivity_{kind}.{suffix}", dpi=220)

@@ -93,7 +93,7 @@ def fit_slope_window(t: np.ndarray, s: np.ndarray, start: int, end: int) -> tupl
 
 
 def estimate_period(t: np.ndarray, s: np.ndarray) -> tuple[float, float, str]:
-    """Return the historical period, confidence heuristic, and detector source."""
+    """Return the period, confidence heuristic, and detector source."""
     t = np.asarray(t, dtype=float)
     s = np.asarray(s, dtype=float)
     if len(t) < 8:
@@ -135,6 +135,7 @@ def estimate_period(t: np.ndarray, s: np.ndarray) -> tuple[float, float, str]:
 
 
 def terminal_velocity(t: np.ndarray, s: np.ndarray) -> tuple[float, float, tuple[int, int]]:
+    """Return signed velocity, confidence, and a late stable-velocity window."""
     v = moving_average(central_velocity(t, s), 5)
     n = len(v)
     if n < 10:
@@ -153,4 +154,4 @@ def terminal_velocity(t: np.ndarray, s: np.ndarray) -> tuple[float, float, tuple
             best = (score, mean, rel_std, start, start + window)
     if best is None or best[2] > 0.35:
         raise ValueError("terminal velocity segment not found")
-    return abs(float(best[1])), float(1.0 - min(best[2], 1.0)), (int(best[3]), int(best[4]))
+    return float(best[1]), float(1.0 - min(best[2], 1.0)), (int(best[3]), int(best[4]))

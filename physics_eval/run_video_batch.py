@@ -67,7 +67,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt-id", default=None, help="Only process a single Prompt_ID")
     parser.add_argument("--fps", type=float, default=None, help="Fallback fps for evaluation if tracking JSON has no fps/time")
     parser.add_argument("--strict", action="store_true", help="Mark weak/invalid quality as invalid")
-    parser.add_argument("--spring-period-protocol", choices=["legacy_v1", "period_confidence_v3_candidate"], default="legacy_v1")
 
     parser.add_argument("--skip-tracking-if-exists", action="store_true", help="Reuse output tracking JSON if already present")
     parser.add_argument("--tracking-only", action="store_true", help="Only run tracking, do not run physics evaluation")
@@ -168,8 +167,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python-executable", default=sys.executable, help="Python executable used to run SAM2 tracking")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
-    if args.strict and args.spring_period_protocol == "period_confidence_v3_candidate":
-        parser.error("--strict conflicts with the eligibility-preserving spring protocol")
     return args
 
 
@@ -1132,7 +1129,6 @@ def main() -> None:
                 fps=args.fps,
                 save_diag=args.save_diagnostics,
                 strict=args.strict,
-                spring_period_protocol=args.spring_period_protocol,
             )
             eval_results.append(result)
             result_path = write_per_video_result(
