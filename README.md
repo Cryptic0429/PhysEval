@@ -90,7 +90,7 @@ By default, the setup script:
 - downloads `sam2.1_hiera_base_plus.pt` into `repo/sam2/checkpoints/`;
 - downloads `yolov8n.pt` into the repository root.
 
-Useful alternatives:
+Optional setup commands:
 
 ```bash
 # Use the larger SAM2 checkpoint.
