@@ -5,8 +5,9 @@ from typing import Callable
 
 import pandas as pd
 
-from physics_eval.utils.io import failure_result, finish_result, parse_known_params
-from physics_eval.utils.tracking import get_object_track
+from physics_eval.io.results import failure_result, finish_result
+from physics_eval.io.metadata import parse_known_params
+from physics_eval.io.tracks import get_object_track
 
 
 def safe_eval(row: dict, func: Callable[[], dict]) -> dict:

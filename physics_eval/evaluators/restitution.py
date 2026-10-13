@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from physics_eval.evaluators.common import done, get_primary_track, safe_eval
-from physics_eval.utils.fitting import fit_slope_window, moving_average
-from physics_eval.utils.quality import require_min_frames
+from physics_eval.math.fitting import fit_slope_window, moving_average
+from physics_eval.quality.estimation_checks import require_min_frames
 
 
 def eval_restitution(tracking_df, metadata_row):

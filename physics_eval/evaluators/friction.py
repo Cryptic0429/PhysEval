@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 
 from physics_eval.evaluators.common import done, g_from_params, get_primary_track, safe_eval
-from physics_eval.utils.calibration import require_scale
-from physics_eval.utils.fitting import central_velocity, project_motion, quadratic_fit
-from physics_eval.utils.quality import one_dimensional_score, require_min_frames, status_from_r2
+from physics_eval.calibration import require_scale
+from physics_eval.math.fitting import central_velocity, project_motion, quadratic_fit
+from physics_eval.quality.estimation_checks import one_dimensional_score, require_min_frames, status_from_r2
 
 
 def eval_friction(tracking_df, metadata_row):

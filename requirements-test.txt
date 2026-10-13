@@ -1,0 +1,2 @@
+# Install the core environment separately; this adds the test runner.
+pytest

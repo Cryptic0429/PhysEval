@@ -1,208 +1,281 @@
 # PhysEval
 
+**Quantitative Physical Evaluation for Text-to-Video Generation**
+
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-**Quantifying the gap between video generation and physical laws.**
+PhysEval measures how closely generated videos follow quantitative physical constraints. It pairs **500 prompts across 10 physical metrics** with an automatic pipeline that tracks objects, estimates physical quantities, and compares them with the targets specified in the benchmark.
 
-PhysEval is a benchmark dataset and automatic evaluation protocol for testing whether text-to-video (T2V) generations obey **quantitative** physical constraints. It asks a stricter question than visual plausibility: when a prompt specifies a physical quantity, does the generated video contain measurable motion whose estimated value matches that target?
+[Benchmark](#-benchmark-data) · [Setup](#-environment-setup) · [Quick Start](#-running-evaluation) · [Scoring Guide](SCORING_USAGE.md) · [Batch Guide](BATCH_USAGE.md) · [Architecture](docs/ARCHITECTURE.md)
 
-Each benchmark instance pairs a natural-language prompt with auditable evaluation metadata: the physical metric, target value and unit, evaluator, expected object count, calibration setting, and known physical parameters. Given generated videos, the pipeline initializes and tracks objects, checks whether each video is measurable, estimates the requested quantity with a task-specific evaluator, and reports normalized scores together with failure diagnostics.
+---
 
-## Benchmark at a Glance
+## ✨ Key Features
 
-- **500 prompt-metadata pairs**: 50 prompts for each of 10 physical metrics.
-- **Four task families**: kinematics, physical constants, material parameters, and conservation-style tasks.
-- **Automatic and auditable**: every score can be traced to a prompt, target, tracked trajectory, measured value, validity status, mask-quality score, and discard reason.
-- **Designed for T2V output**: prompts request a fixed camera, approximately planar motion, visible targets, and simple scenes suitable for automatic measurement.
+- **Quantitative targets:** 50 prompt-metadata pairs per metric, covering kinematics, gravity, material parameters, and conservation tasks.
+- **Automatic measurement:** a fixed YOLO-first initialization protocol with motion fallback, SAM2 tracking, and task-specific inverse-physics estimation.
+- **Quality-aware evaluation:** tracking and physics-validity gates determine measurability; continuous mask quality adjusts scores.
+- **Traceable results:** each video retains its target, measurement, trajectory, evaluator status, quality evidence, and failure reasons.
+- **Unified workflow:** evaluate and score through `physeval.py`, with an optional detector/tracker comparison module.
 
-| Family | Metric | Quantity estimated from the video | Expected objects |
-|---|---|---|---:|
+## 🛠️ Environment Setup
+
+Use **Python 3.10+**; Python 3.11 is a convenient choice for a new environment. The core requirements include **PyTorch ≥ 2.5.1** and **Torchvision ≥ 0.20.1**, consistent with [SAM2's installation requirements](https://github.com/facebookresearch/sam2#installation). A CUDA-capable GPU is recommended for video tracking.
+
+```bash
+# 1. Clone the repository.
+git clone https://github.com/Cryptic0429/PhysEval.git
+cd PhysEval
+
+# 2. Create an environment.
+conda create -n physeval python=3.11 -y
+conda activate physeval
+
+# 3. Install the core dependencies.
+python -m pip install -r requirements.txt
+```
+
+On GPU servers, install a compatible CUDA build of `torch` and `torchvision` before the final step when needed.
+
+> Run all commands below from the repository root, the directory containing `physeval.py`.
+
+## 🤗 Model Assets
+
+Prepare the SAM2 source, checkpoint, and YOLO weights, and install SAM2:
+
+```bash
+bash tools/setup_assets.sh --install-sam2
+```
+
+The default setup uses the following paths:
+
+| Asset | Local path |
+| --- | --- |
+| SAM2 source | `repo/sam2/` |
+| SAM2.1 Base+ checkpoint | `repo/sam2/checkpoints/sam2.1_hiera_base_plus.pt` |
+| YOLOv8n weights | `yolov8n.pt` |
+
+Formal evaluation always tries YOLO first and falls back to motion initialization when YOLO fails or does not provide the required number of usable target prompts. Prepare both YOLO and SAM2 assets for ordinary evaluation. For other SAM2 sizes or custom asset locations, run `bash tools/setup_assets.sh --help` and pass the matching `--model-cfg` and `--model-weights` to evaluation.
+
+## 📦 Benchmark Data
+
+The prompt and metadata files are included in [`benchmark/metadata/`](benchmark/metadata/README.md); no separate benchmark download is required.
+
+| File | Contents |
+| --- | --- |
+| [`phys_t2v_bench_prompts.xlsx`](benchmark/metadata/phys_t2v_bench_prompts.xlsx) | Generation prompts in the `All_Prompts` sheet |
+| [`phys_t2v_bench_metadata.xlsx`](benchmark/metadata/phys_t2v_bench_metadata.xlsx) | Targets, units, evaluator settings, object counts, and calibration in the `metadata` sheet |
+| [`csv/`](benchmark/metadata/csv/) | UTF-8 exports of all workbook sheets |
+
+Each metric contains **50 samples**, for **500 samples** in total:
+
+| Family | Metric | Measurement basis | Objects |
+| --- | --- | --- | ---: |
 | Kinematics | Velocity | Linear trajectory slope | 1 |
 | Kinematics | Acceleration | Quadratic trajectory coefficient | 1 |
 | Physical constant | Gravity | Free-fall acceleration | 1 |
-| Material parameter | Friction coefficient | Deceleration ratio | 1 |
+| Material parameter | Friction coefficient | Deceleration relative to gravity | 1 |
 | Material parameter | Restitution coefficient | Post-/pre-impact speed ratio | 1 |
-| Material parameter | Density | Early falling acceleration in fluid | 1 |
+| Material parameter | Density | Initial falling acceleration in fluid | 1 |
 | Material parameter | Fluid viscosity | Terminal velocity | 1 |
-| Material parameter | Spring constant | Oscillation period | 1 |
+| Material parameter | Spring constant | Oscillation period with known mass | 1 |
 | Conservation | Mechanical energy conservation | Energy ratio | 1 |
 | Conservation | Momentum conservation 1D | Relative momentum error | 2 |
 
-The released prompt and metadata workbooks are documented in [`benchmark/metadata/README.md`](benchmark/metadata/README.md).
-
-## How Evaluation Works
-
-PhysEval deliberately separates **measurability** from **physical accuracy**.
-
-1. **Object tracking**: YOLO-assisted initialization and SAM2 mask propagation recover visible object trajectories.
-2. **Tracking-quality gate**: the expected object count, valid-frame coverage, and meaningful motion are checked. A failed gate makes the video ineffective for scoring.
-3. **Physics-validity gate**: a task-specific evaluator returns `valid`, `weak_valid`, `invalid`, or `failed`. Only `valid` and `weak_valid` videos enter the effective set.
-4. **Mask reliability**: after both hard gates pass, a continuous mask-quality score in `[0, 1]` acts as a soft proxy for 2D trajectory reliability. It reduces the score but does not remove a video under the paper's default policy.
-5. **Physical scoring**: relative error is converted to a metric-normalized physical score and multiplied by tracking, mask-quality, and estimation-validity terms.
-
-The paper reports three complementary views:
-
-- **Effective-video score (primary physical-accuracy result)**: mean adjusted score over videos that pass both hard gates.
-- **Discard rate (measurability result)**: fraction of videos that fail tracking quality, physics validity, or both.
-- **End-to-end score (supplementary)**: mean adjusted score over all videos, assigning zero to discarded samples. This mixes measurability with physical accuracy and should not replace the two reports above.
-
-See [`SCORING_USAGE.md`](SCORING_USAGE.md) for equations, thresholds, status rules, and output fields.
-
-## Scope and Assumptions
-
-The current evaluators use simple, inspectable inverse-physics models. They assume short monocular videos, a fixed camera, approximately planar motion parallel to the image plane, a known or inferable time base, stable 2D tracks, and benchmark-provided scale when metric units are required.
-
-This release does not establish full 3D physical correctness. Depth drift, camera motion, perspective change, occlusion, deformation, complex fluids, rotation, or long-horizon interactions may invalidate the 2D estimates. Tracking gates and mask reliability expose some failures, but they are not proof of true 3D planarity. Benchmark scores should therefore be treated as diagnostic measurements, not as certification for safety-critical simulation.
-
-## Repository Contents
-
-- `benchmark/metadata/`: released prompt workbook, evaluation metadata, and UTF-8 CSV exports.
-- `physics_eval/`: task-specific inverse-physics evaluators and batch evaluation logic.
-- `scripts/`: SAM2 tracking, YOLO initialization, mask checks, batch execution, and score aggregation.
-- `physeval.py`: unified entry point for `eval`, `score`, and optional `compare` / `compare-summary` commands.
-- [`compare/`](compare/README.md): optional detector/tracker comparison, including saved comparison reports and its own outputs.
-- `requirements-compare.txt`: opt-in comparison dependencies, including the base requirements.
-- [`BATCH_USAGE.md`](BATCH_USAGE.md): complete batch-running and troubleshooting guide.
-- [`SCORING_USAGE.md`](SCORING_USAGE.md): paper-aligned scoring and report interpretation.
-- `configs/scoring/`: versioned mask-quality scoring protocols used by the scorer.
-
-Generated videos, SAM2 source/checkpoints, YOLO weights, and batch outputs are
-not included in this code repository. Supply videos locally when running an
-evaluation.
-
-## Installation
-
-Install Python dependencies first. On a GPU server, ensure that `torch` and `torchvision` match the machine's CUDA runtime. If the environment already has a working PyTorch installation, keep it and install the remaining packages around it.
-
-```bash
-pip install -r requirements.txt
-```
-
-Prepare the external SAM2 and YOLO assets:
-
-```bash
-bash scripts/setup_sam2_assets.sh
-```
-
-By default, the setup script:
-
-- clones `https://github.com/facebookresearch/sam2.git` into `repo/sam2/`;
-- downloads `sam2.1_hiera_base_plus.pt` into `repo/sam2/checkpoints/`;
-- downloads `yolov8n.pt` into the repository root.
-
-Optional setup commands:
-
-```bash
-# Use the larger SAM2 checkpoint.
-bash scripts/setup_sam2_assets.sh --sam2-model large
-
-# Clone/download assets and install SAM2 in editable mode.
-bash scripts/setup_sam2_assets.sh --install-sam2
-
-# Skip YOLO when using motion-only initialization.
-bash scripts/setup_sam2_assets.sh --skip-yolo
-```
-
-If `--install-sam2` was not used, install SAM2 after cloning:
-
-```bash
-pip install -e repo/sam2
-```
-
-## Quick Start
-
-Run the commands below from the repository root.
-
-Generate one video for every prompt in `benchmark/metadata/phys_t2v_bench_prompts.xlsx`. Name each video according to the `Video_File` column in the metadata workbook and place all videos for one model under:
+Generate one video per prompt and name it exactly as specified by the metadata's `Video_File` column. Keep each model's videos in a separate folder; the examples below use `my_model`:
 
 ```text
-data/t2v_videos/<model_name>/
+data/t2v_videos/my_model/
+├── V001.mp4
+├── V002.mp4
+├── ...
+└── P050.mp4
 ```
 
-Run tracking and physical evaluation for that model:
+Generated videos and external model assets are supplied locally. Match videos by metadata keys and filenames; keep failed generations in the evaluation accounting.
+
+## 🚀 Running Evaluation
+
+```text
+Generated videos → YOLO initialization → motion fallback when needed → SAM2 tracking
+                 → Quality diagnostics and physics estimation (eval)
+                 → Quality-aware scoring and model reports (score)
+```
+
+YOLO is used only to initialize the target prompts; SAM2 propagates the masks through the video. An exception, no usable detection, or an incomplete target count triggers motion fallback. Motion must also supply the required count or the sample is recorded as an initialization failure. `run_config.json` and `tracking_points.json` record the fixed policy, the adopted initialization source (`auto_yolo` or `auto_motion`), and the fallback reason. There is no detector-selection option in formal `eval`.
+
+### 1. Try one video
+
+Evaluate `V001` and save a tracking visualization to inspect initialization and tracking:
 
 ```bash
 python physeval.py eval \
   --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
-  --video-root data/t2v_videos/<model_name> \
-  --output-dir batch_eval_results/<model_name> \
-  --detector yolo_then_motion
+  --video-root data/t2v_videos/my_model \
+  --output-dir batch_eval_results/my_model \
+  --prompt-id V001 \
+  --vis
 ```
 
-Score the compact results using the protocol reported in the paper:
+### 2. Evaluate the full benchmark
+
+Run tracking and physics estimation for all metadata rows:
+
+```bash
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --video-root data/t2v_videos/my_model \
+  --output-dir batch_eval_results/my_model
+```
+
+Inspect `batch_eval_results/my_model/<metric>/<prompt_id>/result.json` first. Each sample also saves `tracking_points.json`, `run_config.json`, and mask-quality diagnostics.
+
+### 3. Score the results
+
+After the full evaluation, aggregate results using the PhysEval scoring protocol defined in the paper:
 
 ```bash
 python physeval.py score \
-  --result-root batch_eval_results/<model_name> \
-  --model-name <model_name> \
+  --result-root batch_eval_results/my_model \
+  --model-name my_model \
   --weak-valid-multiplier 0.8
 ```
 
-> **Protocol compatibility note:** the CLI default for `weak_valid` is `0.8`, matching the paper protocol. The option remains available for explicit sensitivity analyses.
+The explicit `0.8` is the paper-specified weight for `weak_valid` estimates and is also the CLI default. The scorer checks benchmark completeness by default. For an explicitly partial smoke test, add `--metadata none`; treat that report as exploratory.
 
-The principal outputs are:
+## 📊 Scoring and Reports
 
-```text
-batch_eval_results/<model_name>/score_reports/<protocol_id>/all_metrics/
-  score_summary.json
-  metric_scores.csv
-  per_video_scores.csv
-  score_exclusion_reasons.csv
-  plots/
-```
+PhysEval separates **measurability** from **physical accuracy**. A video enters the effective set only if its tracking passes the expected-object-count, frame-coverage, and meaningful-motion checks, and its physics evaluator returns `valid` or `weak_valid`.
 
-For detailed commands, reuse modes, output layouts, and diagnostics, continue with [`BATCH_USAGE.md`](BATCH_USAGE.md).
-
-### Scoring protocol and outputs
-
-The default method combines mask-quality evidence in three equally weighted
-groups and averages across required objects. Missing evidence makes a score
-unavailable; it is not filled in with a perfect score. Older scoring behavior
-can be selected explicitly for reproduction. See [`SCORING_USAGE.md`](SCORING_USAGE.md)
-for the protocol options and implementation details.
-
-The per-video score combines physical accuracy, measurement quality, and
-estimation validity:
+For videos in that set, PhysEval defines the score as:
 
 ```text
-final_score = physical_accuracy_score
-              × measurement_quality_multiplier
-              × estimation_validity_multiplier
+physical_accuracy_score = 100 × exp(-relative_error / tau)
+adjusted_score = physical_accuracy_score
+                 × tracking_quality_multiplier
+                 × mask_quality_score
+                 × estimation_validity_multiplier
 ```
 
-The physical-accuracy term converts relative error to a metric-specific score.
-Tracking and physics-validity gates determine whether a video enters the
-effective set; a low but measured Qmask does not by itself remove it. The default
-`weak_valid` multiplier is `0.8`, matching the paper protocol. Reports are written
-under `score_reports/<protocol_id>/<scope>/` and include model and metric summaries,
-per-video scores, and exclusion reasons. See [`SCORING_USAGE.md`](SCORING_USAGE.md)
-for formula details, status rules, and report fields.
+`tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-## Optional: detector/tracker comparison
+The paper defines the **mask-quality score, Q_mask**, using three groups: **shape and scale**, **segmentation consistency**, and **local completeness**. Component scores are averaged within each group, the three groups receive equal weight, and the resulting object scores are averaged across required objects. Q_mask supplies the `mask_quality_score` term above. A low measured Q_mask reduces the adjusted score without excluding the video; missing required evidence makes scoring unavailable.
 
-Qmask scoring is shared between core evaluation and comparison, with three
-equally weighted quality groups by default. See [scoring usage](SCORING_USAGE.md)
-for the formula, completeness checks, and offline sensitivity-analysis command.
+| Reported quantity | Interpretation |
+| --- | --- |
+| **Effective-video score** | Mean adjusted score over effective videos; report this with discard rate. |
+| **Discard rate** | Fraction of videos that fail tracking quality, physics validity, or both. |
+| **End-to-end score** | Supplementary mean over all videos, assigning zero to discarded videos. |
 
-The core `eval` and `score` commands do not import the comparison package or require
-the TAM/XMem dependencies. Enable comparison explicitly when studying detector
-or tracker choices:
+Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs or required scoring evidence are incomplete.
+
+Reports are saved under `batch_eval_results/my_model/score_reports/<protocol_id>/all_metrics/`:
+
+| Output | Contents |
+| --- | --- |
+| `score_summary.json` | Model and metric summaries, scoring settings, and protocol fingerprint |
+| `metric_scores.csv` | Per-metric scores and measurability statistics |
+| `per_video_scores.csv` | Per-video measurements, quality factors, statuses, and scores |
+| `score_exclusion_reasons.csv` | Counts of exclusion reasons |
+| `plots/` | Score and discard-rate charts |
+
+See the [scoring guide](SCORING_USAGE.md) for relative-error definitions, thresholds, completeness checks, and sensitivity-analysis options.
+
+## ⚙️ Key Evaluation Options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--metadata` | Auto-discovery in `data/metadata/` | Pass the released workbook explicitly, as shown above. |
+| `--prompt-id` | All rows | Evaluate one prompt for a smoke test. |
+| `--reuse-tracking` | Off | Reuse existing tracking JSON when available. |
+| `--eval-only` | Off | Estimate physics from existing tracking JSON. |
+| `--vis` / `--diagnostics` | Off | Save tracking videos / additional debugging outputs. |
+| `--sam2-precision` | `auto` | Select `auto`, `fp32`, `fp16`, or `bf16` inference. |
+| `--area-action` | `warn` | Keep mask-QC flags as warnings; `skip` changes the evaluation policy. |
+
+Run `python physeval.py eval --help` or `python physeval.py score --help` for all options. See the [batch guide](BATCH_USAGE.md) for tracking reuse, custom checkpoints, and troubleshooting.
+
+## 🔬 Optional: Detector and Tracker Comparison
+
+The comparison module supports `fasterrcnn_sam2`, `yolo_sam2`, and `yolo_tam`. Install its additional dependencies only when using this module:
 
 ```bash
 python -m pip install -r requirements-compare.txt
-bash compare/scripts/setup_compare_assets.sh --install-editable
-python physeval.py compare --video-root data/t2v_videos/model_name --model-name model_name --dry-run
-# Remove --dry-run to run the selected comparison modes.
-python physeval.py compare-summary --model-name model_name
+bash tools/setup_assets.sh --mode compare --install-editable
+
+# Check video/metadata matching before inference.
+python physeval.py compare \
+  --video-root data/t2v_videos/my_model \
+  --model-name my_model \
+  --dry-run
 ```
 
-Comparison shares `benchmark/metadata/`, `repo/`, and `yolov8n.pt` with the core
-project. Its generated outputs and frame cache stay in `compare/outputs/` and
-`compare/cache/`; existing reports are preserved in `compare/results/`.
-These reports measure tracking and mask quality, not physical accuracy scores.
-See [the comparison guide](compare/README.md) for modes and full commands.
+Remove `--dry-run` to run the comparison, then summarize it with:
 
-The original `scripts/run_batch_simple.py`, `scripts/score_results.py`, and
-`compare/scripts/` entry points remain available. All script locations and
-default asset paths are resolved from the checkout, so the outer
-directory may be renamed after cloning.
+```bash
+python physeval.py compare-summary --model-name my_model
+```
+
+Comparison source lives in `experiments/tracking_comparison/` and shares the core model assets and metadata. For compatibility, its runtime outputs remain in `compare/outputs/`, frame caches in `compare/cache/`, and preserved reports in `compare/results/`; these are data directories. These reports describe tracking and mask quality; physical-accuracy results come from `eval` and `score`. See the [comparison guide](experiments/tracking_comparison/README.md) for paired modes and full commands.
+
+## 🧱 Project Structure
+
+```text
+PhysEval/
+├── physeval.py                    # Public command-line entry point
+├── physics_eval/
+│   ├── cli.py / config.py         # Commands and shared defaults
+│   ├── pipeline.py / estimation.py # Evaluation orchestration
+│   ├── schemas.py                # Shared prompts and video interfaces
+│   ├── tracking/                 # Initialization and shared SAM2/TAM backends
+│   ├── evaluators/               # Ten task-specific physics evaluators
+│   ├── calibration.py / math/    # Scale calibration, fitting and geometry
+│   ├── quality/                  # Tracking gates and mask evidence/Q_mask
+│   ├── io/                       # Metadata, tracks, results and reports
+│   └── scoring.py / reporting.py # Scores, summaries and plots
+├── experiments/                  # Tracking comparisons and saved-evidence analyses
+├── validation/                   # Open-video preflight and controlled masks
+├── tools/                        # Asset setup, environment checks and maintenance
+├── tests/                        # Unit, synthetic and integration checks
+├── benchmark/metadata/           # Released workbooks and CSVs
+├── configs/scoring/              # Versioned Q_mask protocols
+├── compare/                      # Runtime outputs/cache and preserved reports
+├── requirements*.txt             # Core and optional comparison dependencies
+└── docs/ARCHITECTURE.md           # Responsibilities and migration coverage
+```
+
+The [architecture guide](docs/ARCHITECTURE.md) maps the complete workflow and the migrated source files. Experimental and validation commands are explicit; `eval` does not run them automatically.
+
+## 🧪 Research, Validation and Maintenance
+
+```bash
+# Analyze saved results without retracking (the original six-model/3,000-video cohort).
+python physeval.py analyze-sensitivity --results-root ../results --output-dir runs/sensitivity
+
+# Controlled mask checks, including a stable wrong-target negative control.
+python physeval.py validate-masks --output runs/validation/mask_controls.csv
+
+# Inspect a curated open-video package without requiring GPU inference.
+python physeval.py validate-open-video --data-only
+
+# Optional comparison environment/GPU checks and saved-mask inspection.
+python tools/check_environment.py
+python tools/check_gpu.py
+python tools/inspect_masks.py --sam2-json path/to/tracking_points.json
+
+# CPU regression tests.
+python -m pip install -r requirements-test.txt
+python -m pytest tests
+```
+
+`analyze-mask-protocols` reproduces historical Q_mask comparisons. `compare-cross-model` combines model-stratified paired reports; see the [comparison guide](experiments/tracking_comparison/README.md). These analyses retain their declared cohorts and scientific limitations.
+
+## 🔍 Scope and Assumptions
+
+The evaluators use inspectable inverse-physics models for short monocular videos. They assume a fixed camera, approximately planar motion parallel to the image plane, a known or inferable time base, stable 2D tracks, and scale calibration when metric units are required.
+
+Camera motion, depth changes, perspective variation, occlusion, deformation, rotation, or complex interactions can compromise these estimates. Tracking gates and mask quality reveal some failures, but do not establish full 3D physical correctness. Interpret scores within these measurement assumptions.
+
+## 🙏 Acknowledgements
+
+The tracking pipeline builds on [SAM2](https://github.com/facebookresearch/sam2) and [Ultralytics YOLO](https://github.com/ultralytics/ultralytics). The optional comparison module also uses Torchvision's Faster R-CNN and Track-Anything / XMem; see its [guide](experiments/tracking_comparison/README.md) for setup and dependencies.
