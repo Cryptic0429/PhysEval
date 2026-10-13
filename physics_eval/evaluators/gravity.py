@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from physics_eval.evaluators.common import done, get_primary_track, g_from_params, safe_eval
-from physics_eval.utils.calibration import estimate_scale
-from physics_eval.utils.fitting import project_motion, quadratic_fit
-from physics_eval.utils.quality import require_min_frames, status_from_r2
+from physics_eval.calibration import estimate_scale
+from physics_eval.math.fitting import project_motion, quadratic_fit
+from physics_eval.quality.estimation_checks import require_min_frames, status_from_r2
 
 
 def eval_gravity(tracking_df, metadata_row):

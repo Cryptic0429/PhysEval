@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from physics_eval.evaluators.common import done, get_primary_track, parse_known_params, safe_eval
-from physics_eval.utils.calibration import require_scale
-from physics_eval.utils.fitting import quadratic_fit
-from physics_eval.utils.quality import require_min_frames, status_from_r2
+from physics_eval.calibration import require_scale
+from physics_eval.math.fitting import quadratic_fit
+from physics_eval.quality.estimation_checks import require_min_frames, status_from_r2
 
 
 def eval_density_acceleration(tracking_df, metadata_row):

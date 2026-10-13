@@ -1,16 +1,16 @@
 # Batch Evaluation Usage
 
-[English](BATCH_USAGE.md) | [简体中文](BATCH_USAGE_zh-CN.md)
+[Project README](README.md) | [中文项目说明](README_zh-CN.md) | [Architecture](docs/ARCHITECTURE.md)
 
 This guide covers the executable pipeline behind the evaluation protocol described in the PhysEval paper: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
 
-The batch stage decides whether a video is measurable and estimates its physical quantity; model-level scoring is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability is retained as a soft score multiplier.
+The batch stage records measurability checks and estimates each video's physical quantity; model-level scoring applies the gates and is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability is retained as a soft score multiplier.
 
-The recommended entrypoint is:
+Use the unified public entry point from the repository root:
 
 ```bash
-cd /path/to/workspace
-python scripts/run_batch_simple.py
+cd /path/to/PhysEval
+python physeval.py eval
 ```
 
 By default it uses:
@@ -20,7 +20,7 @@ metadata    data/metadata/*.xlsx, if there is exactly one file
 videos      data/t2v_videos
 sam2 repo   repo/sam2
 outputs     batch_eval_results
-detector    yolo_then_motion
+init policy YOLO first, motion fallback (fixed)
 yolo model  yolov8n.pt, if it exists under workspace root
 ```
 
@@ -60,7 +60,7 @@ batch_eval_results/<metric>/<prompt_id>/tracking_points.json
   quality_checks.mask_qc
 ```
 
-These markers are written during batch processing and are later used by scoring.
+These markers are written during batch processing and are later used by scoring. Mask PNGs remain under `sam2_tracks/<scene>/masks/` and are referenced from the tracking evidence; extracted frames are under `data/custom/<scene>/frames/`. Preserve these referenced assets when moving results or recomputing diagnostics.
 
 Each compact record preserves the benchmark specification, physics output, tracking status, mask diagnostics, target and measured values, relative error when available, and reason tokens. This is the auditable unit that is later aggregated into effective-video scores and discard diagnostics.
 
@@ -83,7 +83,7 @@ Video order in the folder does not matter. The batch script looks up each file b
 If you are comparing multiple text-to-video models, keep one output directory per model:
 
 ```bash
-python scripts/run_batch_simple.py \
+python physeval.py eval \
   --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
   --video-root data/t2v_videos/model_a \
   --output-dir batch_eval_results/model_a
@@ -92,107 +92,105 @@ python scripts/run_batch_simple.py \
 After the batch run, score that model with:
 
 ```bash
-python scripts/score_results.py \
+python physeval.py score \
   --result-root batch_eval_results/model_a \
   --model-name model_a \
   --weak-valid-multiplier 0.8
 ```
 
-The explicit `0.8` matches the paper protocol; see `SCORING_USAGE.md` for the current CLI-default compatibility note.
+The explicit `0.8` matches the paper protocol and is also the CLI default; see [SCORING_USAGE.md](SCORING_USAGE.md).
 
 ## Common Commands
 
 Run all rows in the metadata:
 
 ```bash
-python scripts/run_batch_simple.py
+python physeval.py eval
 ```
 
 Run one row by `Index`:
 
 ```bash
-python scripts/run_batch_simple.py --index 1
+python physeval.py eval --index 1
 ```
 
 Run one row by `Prompt_ID`:
 
 ```bash
-python scripts/run_batch_simple.py --prompt-id B3_1_friction_001
+python physeval.py eval --prompt-id F001
 ```
 
 Reuse existing tracking outputs when possible:
 
 ```bash
-python scripts/run_batch_simple.py --reuse-tracking
+python physeval.py eval --reuse-tracking
 ```
 
 Evaluate existing tracking only, without running SAM2:
 
 ```bash
-python scripts/run_batch_simple.py --eval-only
+python physeval.py eval --eval-only
 ```
 
 Track only, without physics evaluation:
 
 ```bash
-python scripts/run_batch_simple.py --tracking-only
+python physeval.py eval --tracking-only
 ```
 
 Save SAM2 visualization videos:
 
 ```bash
-python scripts/run_batch_simple.py --vis
+python physeval.py eval --vis
 ```
 
 Write extra debug CSV files and diagnostic plots:
 
 ```bash
-python scripts/run_batch_simple.py --diagnostics
+python physeval.py eval --diagnostics
 ```
 
 Adjust the static-object quality gate:
 
 ```bash
-python scripts/run_batch_simple.py --min-motion-extent-ratio 1.0
+python physeval.py eval --min-motion-extent-ratio 1.0
 ```
 
 Adjust how many frames an object must appear in to count:
 
 ```bash
-python scripts/run_batch_simple.py --min-object-coverage 0.6
+python physeval.py eval --min-object-coverage 0.6
 ```
 
-## Detector Options
+## Fixed Initialization Protocol
 
-Default detector:
+Formal `eval` follows one automatic protocol:
+
+```text
+YOLO target candidates
+  → accept when the usable prompt count matches Num_Objects
+  → otherwise motion detection and object refinement
+  → accept when motion provides the required count
+  → SAM2 mask propagation
+```
+
+YOLO candidate generation applies the target-class, confidence, and geometry filters. A detector exception, empty usable candidates, or an incomplete object count triggers motion fallback. For example, a two-object task cannot proceed with only one YOLO prompt. If motion also fails to provide the required count, the sample is recorded as an initialization failure.
+
+The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. There is no user-selectable motion-only or YOLO-only mode in formal evaluation. The component-comparison modes remain available through `compare` for declared research experiments.
+
+The adopted source is saved as `auto_yolo` or `auto_motion`; motion candidates retain `yolo_fallback_reason`. Inspect `tracking_points.json` and `run_config.json` to distinguish attempted YOLO detection from adopted YOLO initialization. Keep these records when reporting how often each path was used.
+
+Use a specific YOLO weights file when required by a declared experimental setup:
 
 ```bash
-python scripts/run_batch_simple.py --detector yolo_then_motion
+python physeval.py eval --yolo-weights yolov8n.pt
 ```
 
-This tries YOLO first and falls back to motion-based initialization if YOLO fails.
-
-Use motion only:
-
-```bash
-python scripts/run_batch_simple.py --detector motion
-```
-
-Use YOLO only:
-
-```bash
-python scripts/run_batch_simple.py --detector yolo
-```
-
-Use a specific YOLO weights file:
-
-```bash
-python scripts/run_batch_simple.py --yolo-weights yolov8n.pt
-```
+Manual prompt metadata remains supported. Renderer ground-truth initialization requires explicit `--allow-renderer-gt-init`, retains its supervision provenance, and must be reported separately from automatic evaluation. Reusing tracks or estimating from existing tracks does not rerun initialization.
 
 ## Mask QC Behavior
 
-The simple entrypoint enables mask QC by default. It saves:
+The public `eval` command enables saved masks and mask QC by default. It saves:
 
 ```text
 batch_eval_results/<metric>/<prompt_id>/mask_qc/mask_qc.json
@@ -202,24 +200,24 @@ batch_eval_results/<metric>/<prompt_id>/plots/obj_000001_mask_area.png
 If a mask QC issue is found, the default action is warning only. The physics evaluator still runs:
 
 ```bash
-python scripts/run_batch_simple.py --area-action warn
+python physeval.py eval --area-action warn
 ```
 
 To skip physics evaluation for videos flagged by mask QC:
 
 ```bash
-python scripts/run_batch_simple.py --area-action skip
+python physeval.py eval --area-action skip
 ```
 
 Disable mask QC plots:
 
 ```bash
-python scripts/run_batch_simple.py --no-plots
+python physeval.py eval --no-plots
 ```
 
 ## Metadata Requirements
 
-The metadata Excel must contain the required columns checked by `physics_eval/utils/io.py`, including:
+The metadata Excel must contain the required columns checked by `physics_eval/io/metadata.py`, including:
 
 ```text
 Index
@@ -240,7 +238,7 @@ Known_Parameters_JSON
 For videos under `data/t2v_videos`, `Video_File` can be a relative path such as:
 
 ```text
-B3_1_friction_001.mp4
+F001.mp4
 ```
 
 For two-object tasks, set:
@@ -249,7 +247,7 @@ For two-object tasks, set:
 Num_Objects = 2
 ```
 
-The current two-object evaluator is mainly `eval_momentum_1d`.
+The current two-object evaluator is `eval_momentum_1d` for one-dimensional momentum conservation.
 
 ## Optional Check Commands
 
@@ -258,13 +256,13 @@ These commands are not required for every run. Use them after copying code to th
 Syntax check:
 
 ```bash
-python -m py_compile physics_eval/run_video_batch.py scripts/run_batch_simple.py scripts/quality/check_mask_area_stability.py
+python -m compileall -q physics_eval experiments validation tools tests
 ```
 
 Show available options:
 
 ```bash
-python scripts/run_batch_simple.py --help
+python physeval.py eval --help
 ```
 
 ## Result Files Used by Model-Level Scoring
@@ -291,7 +289,7 @@ This keeps per-video data compact while preserving enough information for later 
 After a batch run finishes, score the compact results with:
 
 ```bash
-python scripts/score_results.py \
+python physeval.py score \
   --result-root batch_eval_results \
   --model-name my_model \
   --weak-valid-multiplier 0.8

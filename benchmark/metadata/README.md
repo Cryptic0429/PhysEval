@@ -101,27 +101,29 @@ video root such as:
 data/t2v_videos/<model_name>/
 ```
 
-Then run:
+Run from the repository root (the directory containing `physeval.py`):
 
 ```bash
-python scripts/run_batch_simple.py \
+python physeval.py eval \
   --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
   --video-root data/t2v_videos/<model_name> \
   --output-dir batch_eval_results/<model_name>
 ```
+
+Automatic initialization always tries YOLO first, then falls back to motion detection on failure or insufficient usable target prompts. The required count comes from `Num_Objects`; both paths must supply that count. The adopted source and fallback reason are saved with the tracking evidence. No detector choice is required.
 
 The prompts request controlled views because the current inverse-physics models operate on 2D image trajectories. Do not crop, rename, reorder by folder position, or manually filter generated videos before evaluation; the metadata keys and exact `Video_File` names are the source of truth.
 
 Score the outputs with:
 
 ```bash
-python scripts/score_results.py \
+python physeval.py score \
   --result-root batch_eval_results/<model_name> \
   --model-name <model_name> \
   --weak-valid-multiplier 0.8
 ```
 
-The explicit multiplier matches the paper protocol. See the root `SCORING_USAGE.md` for the current CLI-default compatibility note and for the distinction between effective-video score, discard rate, and supplementary end-to-end score.
+The explicit multiplier matches the paper protocol and is also the CLI default. See the [scoring guide](../../SCORING_USAGE.md) for effective-video score, discard rate, and supplementary end-to-end score, and the [architecture guide](../../docs/ARCHITECTURE.md) for the complete workflow.
 
 ## Validation
 

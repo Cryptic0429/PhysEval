@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from physics_eval.evaluators.common import done, parse_known_params, safe_eval
-from physics_eval.utils.fitting import fit_slope_window, pca_project
-from physics_eval.utils.geometry import align_tracks_on_time, distance_xy
-from physics_eval.utils.quality import require_min_frames
-from physics_eval.utils.tracking import get_two_object_tracks
+from physics_eval.math.fitting import fit_slope_window, pca_project
+from physics_eval.math.geometry import align_tracks_on_time, distance_xy
+from physics_eval.quality.estimation_checks import require_min_frames
+from physics_eval.io.tracks import get_two_object_tracks
 
 
 def eval_momentum_1d(tracking_df, metadata_row):

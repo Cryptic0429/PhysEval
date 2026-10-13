@@ -3,8 +3,8 @@ from __future__ import annotations
 import math
 
 from physics_eval.evaluators.common import done, get_primary_track, parse_known_params, safe_eval
-from physics_eval.utils.fitting import estimate_period, project_motion
-from physics_eval.utils.quality import require_min_frames
+from physics_eval.math.fitting import estimate_period, project_motion
+from physics_eval.quality.estimation_checks import require_min_frames
 
 def eval_spring(tracking_df, metadata_row):
     def _run():

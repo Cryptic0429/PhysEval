@@ -96,27 +96,29 @@
 data/t2v_videos/<model_name>/
 ```
 
-然后运行：
+在仓库根目录（包含 `physeval.py` 的目录）运行：
 
 ```bash
-python scripts/run_batch_simple.py \
+python physeval.py eval \
   --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
   --video-root data/t2v_videos/<model_name> \
   --output-dir batch_eval_results/<model_name>
 ```
+
+自动初始化固定先尝试 YOLO，报错或可用目标提示不足时回退运动检测。所需物体数来自 `Num_Objects`，两条路径均须提供该数量；最终来源和回退原因保存在跟踪证据中。用户无需选择检测器。
 
 这些提示词要求受控视角，是因为当前逆物理模型在二维图像轨迹上工作。评测前请勿裁剪、改名、按文件夹顺序重新配对或人工筛除生成视频；元数据键和精确的 `Video_File` 文件名才是匹配依据。
 
 使用以下命令为输出结果评分：
 
 ```bash
-python scripts/score_results.py \
+python physeval.py score \
   --result-root batch_eval_results/<model_name> \
   --model-name <model_name> \
   --weak-valid-multiplier 0.8
 ```
 
-显式传入该乘数是为了与论文协议一致。有关当前命令行默认值的兼容性说明，以及有效视频得分、丢弃率和补充性端到端得分的区别，请参阅 [评分使用说明](../../SCORING_USAGE.md)。
+显式传入的乘数与论文协议一致，也是命令行默认值。有效视频得分、剔除率和补充性端到端得分的区别见[评分使用说明](../../SCORING_USAGE.md)；完整流程见[架构说明](../../docs/ARCHITECTURE.md)。
 
 ## 验证
 
