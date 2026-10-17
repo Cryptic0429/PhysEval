@@ -280,9 +280,6 @@ def parse_score_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 EXTRA_COMMANDS = {
-    "compare": ("experiments.tracking_comparison.runner", "main"),
-    "compare-summary": ("experiments.tracking_comparison.summary", "main"),
-    "compare-cross-model": ("experiments.tracking_comparison.cross_model_summary", "main"),
     "analyze-sensitivity": ("experiments.scoring_sensitivity", "main"),
     "analyze-mask-protocols": ("experiments.historical.qmask_protocol_comparison", "main"),
     "validate-masks": ("validation.synthetic_masks", "main"),
@@ -291,7 +288,7 @@ EXTRA_COMMANDS = {
 
 
 def main(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(description="PhysEval: evaluation, scoring, component experiments and validation.")
+    parser = argparse.ArgumentParser(description="PhysEval: evaluation, scoring, saved-evidence analysis and validation.")
     parser.add_argument("command", choices=["eval", "score", *EXTRA_COMMANDS])
     parser.add_argument("args", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     command = parser.parse_args(argv)

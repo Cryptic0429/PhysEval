@@ -377,7 +377,7 @@ def build_tracking_prompts(
             _write_prompt_debug(frames_dir, auto_results, debug_path)
     elif bool(args.auto_init) or args.init_point_x is None or args.init_point_y is None:
         # Heavy detector dependencies are loaded only for automatic initialization.
-        from .detectors import detect_yolo_prompts, draw_yolo_debug
+        from .yolo import detect_yolo_prompts, draw_yolo_debug
         from .motion import detect_moving_object_prompts
 
         def yolo():

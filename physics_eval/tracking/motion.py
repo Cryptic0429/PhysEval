@@ -1,7 +1,7 @@
 """Motion candidates and visible-object refinement for formal initialization.
 
 These thresholds, clustering, and refinement operations retain the published
-formal pipeline policy; comparison motion detection uses its recorded policy.
+formal pipeline policy.
 """
 from pathlib import Path
 

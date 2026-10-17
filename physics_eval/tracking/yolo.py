@@ -1,7 +1,6 @@
 """YOLO candidates for the formal protocol, retaining its recorded geometry.
 
 The formal path rounds boxes and permits distinct per-object prompt frames.
-Comparison candidate policy is explicit in detectors.py for reproducibility.
 """
 
 from __future__ import annotations
