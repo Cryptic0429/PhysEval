@@ -176,7 +176,7 @@ YOLO target candidates
 
 YOLO candidate generation applies the target-class, confidence, and geometry filters. A detector exception, empty usable candidates, or an incomplete object count triggers motion fallback. For example, a two-object task cannot proceed with only one YOLO prompt. If motion also fails to provide the required count, the sample is recorded as an initialization failure.
 
-The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. There is no user-selectable motion-only or YOLO-only mode in formal evaluation. The component-comparison modes remain available through `compare` for declared research experiments.
+The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. There is no user-selectable motion-only or YOLO-only mode in formal evaluation.
 
 The adopted source is saved as `auto_yolo` or `auto_motion`; motion candidates retain `yolo_fallback_reason`. Inspect `tracking_points.json` and `run_config.json` to distinguish attempted YOLO detection from adopted YOLO initialization. Keep these records when reporting how often each path was used.
 

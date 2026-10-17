@@ -18,7 +18,7 @@ from physics_eval.io.tracks import normalize_records, nested_frames
 from physics_eval.quality.mask_evidence import extract_quality_evidence, load_series_from_json, analyze_series, DEFAULT_DIAGNOSTICS
 from physics_eval.quality.protocol import load_protocol, protocol_hash, validate_protocol
 from physics_eval.quality.mask_score import compute_qmask, component_score
-from experiments.tracking_comparison.metrics import mask_quality, tracking_quality, compare_tracking_files
+from physics_eval.quality.tracking_checks import analyze_tracking_quality_data
 from physics_eval import scoring as scorer
 from physics_eval.cli import parse_score_args
 from types import SimpleNamespace
@@ -94,7 +94,7 @@ class QmaskTests(unittest.TestCase):
         canonical, n = normalize_records({"frames": records, "total_frames": 20}, "exclusive")
         self.assertEqual(n, 20)
         self.assertEqual(canonical[0]["bbox"], [5., 10., 9., 14.])
-        gate = tracking_quality(records, expected_objects=2, total_frames=20, min_coverage=.5, min_motion_ratio=.75)
+        gate = analyze_tracking_quality_data({"frames": nested_frames(canonical, n)}, expected_objects=2, min_object_coverage=.5, min_motion_extent_ratio=.75)
         self.assertEqual(gate["total_frames"], 20)
         self.assertEqual(gate["actual_objects"], 2)
         self.assertEqual(gate["coverage"], 1)
@@ -102,15 +102,12 @@ class QmaskTests(unittest.TestCase):
         nested, _ = normalize_records({"frames": nested_frames(canonical, n), "total_frames": n})
         self.assertEqual(nested, canonical)
 
-    def test_compare_and_core_scores_match(self):
+    def test_two_object_mask_evidence_scores(self):
         records, masks = self.tracks(2)
         evidence = extract_quality_evidence(records, masks, total_frames=20, bbox_convention="exclusive")
         core = compute_qmask(evidence, self.protocol, [1, 2])
-        compare = mask_quality(records, masks, total_frames=20, protocol=self.protocol, required_object_ids=[1, 2])
-        self.assertEqual(core["score"], compare["score"])
-        self.assertEqual(core["objects"], compare["objects"])
         self.assertEqual(core["score"], 1)
-        self.assertEqual(compute_qmask(compare, self.protocol, [1, 2])["score"], core["score"])
+        self.assertEqual(len(core["objects"]), 2)
 
     def test_disk_and_memory_diagnostics_match(self):
         records, masks = self.tracks()
@@ -128,7 +125,6 @@ class QmaskTests(unittest.TestCase):
             memory = extract_quality_evidence(records, masks, total_frames=n, bbox_convention="exclusive")["objects"][0]
             for key in self.protocol["components"]:
                 self.assertAlmostEqual(disk[key], memory[key], msg=key)
-            self.assertEqual(compare_tracking_files(track, track)["bbox_iou_mean"], 1)
 
     def test_scorer_gates_zero_and_unavailable(self):
         with patch.object(sys, "argv", ["score", "--scoring-protocol", "grouped_v2_candidate"]):

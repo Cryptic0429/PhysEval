@@ -16,7 +16,7 @@ PhysEval measures how closely generated videos follow quantitative physical cons
 - **Automatic measurement:** a fixed YOLO-first initialization protocol with motion fallback, SAM2 tracking, and task-specific inverse-physics estimation.
 - **Quality-aware evaluation:** tracking and physics-validity gates determine measurability; continuous mask quality adjusts scores.
 - **Traceable results:** each video retains its target, measurement, trajectory, evaluator status, quality evidence, and failure reasons.
-- **Unified workflow:** evaluate and score through `physeval.py`, with an optional detector/tracker comparison module.
+- **Unified workflow:** evaluate and score through `physeval.py`.
 
 ## 🛠️ Environment Setup
 
@@ -195,29 +195,6 @@ See the [scoring guide](SCORING_USAGE.md) for relative-error definitions, thresh
 
 Run `python physeval.py eval --help` or `python physeval.py score --help` for all options. See the [batch guide](BATCH_USAGE.md) for tracking reuse, custom checkpoints, and troubleshooting.
 
-## 🔬 Optional: Detector and Tracker Comparison
-
-The comparison module supports `fasterrcnn_sam2`, `yolo_sam2`, and `yolo_tam`. Install its additional dependencies only when using this module:
-
-```bash
-python -m pip install -r requirements-compare.txt
-bash tools/setup_assets.sh --mode compare --install-editable
-
-# Check video/metadata matching before inference.
-python physeval.py compare \
-  --video-root data/t2v_videos/my_model \
-  --model-name my_model \
-  --dry-run
-```
-
-Remove `--dry-run` to run the comparison, then summarize it with:
-
-```bash
-python physeval.py compare-summary --model-name my_model
-```
-
-Comparison source lives in `experiments/tracking_comparison/` and shares the core model assets and metadata. For compatibility, its runtime outputs remain in `compare/outputs/`, frame caches in `compare/cache/`, and preserved reports in `compare/results/`; these are data directories. These reports describe tracking and mask quality; physical-accuracy results come from `eval` and `score`. See the [comparison guide](experiments/tracking_comparison/README.md) for paired modes and full commands.
-
 ## 🧱 Project Structure
 
 ```text
@@ -227,20 +204,19 @@ PhysEval/
 │   ├── cli.py / config.py         # Commands and shared defaults
 │   ├── pipeline.py / estimation.py # Evaluation orchestration
 │   ├── schemas.py                # Shared prompts and video interfaces
-│   ├── tracking/                 # Initialization and shared SAM2/TAM backends
+│   ├── tracking/                 # Initialization and SAM2 backend
 │   ├── evaluators/               # Ten task-specific physics evaluators
 │   ├── calibration.py / math/    # Scale calibration, fitting and geometry
 │   ├── quality/                  # Tracking gates and mask evidence/Q_mask
 │   ├── io/                       # Metadata, tracks, results and reports
 │   └── scoring.py / reporting.py # Scores, summaries and plots
-├── experiments/                  # Tracking comparisons and saved-evidence analyses
+├── experiments/                  # Saved-evidence analyses
 ├── validation/                   # Open-video preflight and controlled masks
 ├── tools/                        # Asset setup, environment checks and maintenance
 ├── tests/                        # Unit, synthetic and integration checks
 ├── benchmark/metadata/           # Released workbooks and CSVs
 ├── configs/scoring/              # Versioned Q_mask protocols
-├── compare/                      # Runtime outputs/cache and preserved reports
-├── requirements*.txt             # Core and optional comparison dependencies
+├── requirements*.txt             # Core and test dependencies
 └── docs/ARCHITECTURE.md           # Responsibilities and migration coverage
 ```
 
@@ -258,7 +234,7 @@ python physeval.py validate-masks --output runs/validation/mask_controls.csv
 # Inspect a curated open-video package without requiring GPU inference.
 python physeval.py validate-open-video --data-only
 
-# Optional comparison environment/GPU checks and saved-mask inspection.
+# Optional environment/GPU checks and saved-mask inspection.
 python tools/check_environment.py
 python tools/check_gpu.py
 python tools/inspect_masks.py --sam2-json path/to/tracking_points.json
@@ -268,7 +244,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-mask-protocols` reproduces historical Q_mask comparisons. `compare-cross-model` combines model-stratified paired reports; see the [comparison guide](experiments/tracking_comparison/README.md). These analyses retain their declared cohorts and scientific limitations.
+`analyze-mask-protocols` reproduces historical Q_mask analyses. These analyses retain their declared cohorts and scientific limitations.
 
 ## 🔍 Scope and Assumptions
 
@@ -278,4 +254,4 @@ Camera motion, depth changes, perspective variation, occlusion, deformation, rot
 
 ## 🙏 Acknowledgements
 
-The tracking pipeline builds on [SAM2](https://github.com/facebookresearch/sam2) and [Ultralytics YOLO](https://github.com/ultralytics/ultralytics). The optional comparison module also uses Torchvision's Faster R-CNN and Track-Anything / XMem; see its [guide](experiments/tracking_comparison/README.md) for setup and dependencies.
+The tracking pipeline builds on [SAM2](https://github.com/facebookresearch/sam2) and [Ultralytics YOLO](https://github.com/ultralytics/ultralytics).

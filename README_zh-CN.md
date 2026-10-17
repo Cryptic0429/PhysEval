@@ -16,7 +16,7 @@ PhysEval 用于衡量生成视频对定量物理约束的遵循程度。项目�
 - **自动测量**：采用固定的 YOLO 优先、运动检测回退初始化规则，结合 SAM2 跟踪与各任务的逆物理估计模型。
 - **考虑测量质量**：用跟踪和物理估计有效性门控判断可测量性，再通过连续掩膜质量分调整得分。
 - **结果可追溯**：保留每条视频的目标值、测量值、轨迹、评估器状态、质量证据和失败原因。
-- **统一运行入口**：通过 `physeval.py` 完成评测与评分，并按需启用检测器与跟踪器比较模块。
+- **统一运行入口**：通过 `physeval.py` 完成评测与评分。
 
 ## 🛠️ 环境配置
 
@@ -195,29 +195,6 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 
 完整参数见 `python physeval.py eval --help` 或 `python physeval.py score --help`。跟踪复用、自定义检查点和故障排查见[批量使用说明](BATCH_USAGE.md)。
 
-## 🔬 可选：检测器与跟踪器比较
-
-比较模块支持 `fasterrcnn_sam2`、`yolo_sam2` 和 `yolo_tam`。使用该模块时再安装额外依赖：
-
-```bash
-python -m pip install -r requirements-compare.txt
-bash tools/setup_assets.sh --mode compare --install-editable
-
-# 推理前检查视频与元数据的匹配关系。
-python physeval.py compare \
-  --video-root data/t2v_videos/my_model \
-  --model-name my_model \
-  --dry-run
-```
-
-移除 `--dry-run` 后运行比较，再执行汇总：
-
-```bash
-python physeval.py compare-summary --model-name my_model
-```
-
-比较源码位于 `experiments/tracking_comparison/`，共用核心模型资源和元数据。为保持兼容，运行输出仍位于 `compare/outputs/`，帧缓存位于 `compare/cache/`，已保存的报告位于 `compare/results/`；这些路径仅存放运行数据。这些报告描述跟踪与掩膜质量；物理准确性结果由 `eval` 和 `score` 生成。配对比较模式和完整命令见[比较模块说明](experiments/tracking_comparison/README.md)。
-
 ## 🧱 项目结构
 
 ```text
@@ -227,20 +204,19 @@ PhysEval/
 │   ├── cli.py / config.py         # 命令与统一默认值
 │   ├── pipeline.py / estimation.py # 正式评测与物理估计调度
 │   ├── schemas.py                # 共用提示和视频接口
-│   ├── tracking/                 # 初始化和共用 SAM2/TAM 后端
+│   ├── tracking/                 # 初始化和SAM2 后端
 │   ├── evaluators/               # 十项物理评估器
 │   ├── calibration.py / math/    # 尺度标定、拟合和几何
 │   ├── quality/                  # 跟踪门控与掩膜证据/Q_mask
 │   ├── io/                       # 元数据、轨迹、结果和报告读写
 │   └── scoring.py / reporting.py # 评分、汇总与绘图
-├── experiments/                  # 跟踪比较与已保存证据上的研究分析
+├── experiments/                  # 已保存证据上的研究分析
 ├── validation/                   # 真实视频预检和可控掩膜验证
 ├── tools/                        # 资源准备、环境诊断和维护
 ├── tests/                        # 单元、合成对照和集成检查
 ├── benchmark/metadata/           # 发布的工作簿与 CSV
 ├── configs/scoring/              # 版本化 Q_mask 规则
-├── compare/                      # 运行输出、缓存和已保存报告
-├── requirements*.txt             # 核心与可选比较依赖
+├── requirements*.txt             # 核心与测试依赖
 └── docs/ARCHITECTURE.md           # 职责说明和迁移覆盖表
 ```
 
@@ -258,7 +234,7 @@ python physeval.py validate-masks --output runs/validation/mask_controls.csv
 # 检查真实视频验证包，可跳过 GPU 推理环境检查。
 python physeval.py validate-open-video --data-only
 
-# 按需检查比较环境、GPU 或已保存掩膜。
+# 按需检查评测环境、GPU 或已保存掩膜。
 python tools/check_environment.py
 python tools/check_gpu.py
 python tools/inspect_masks.py --sam2-json path/to/tracking_points.json
@@ -268,7 +244,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-mask-protocols` 用于历史 Q_mask 规则复现；`compare-cross-model` 用于分模型分层的配对汇总，见[比较说明](experiments/tracking_comparison/README.md)。这些分析保留各自预先声明的队列和科学适用边界。
+`analyze-mask-protocols` 用于历史 Q_mask 规则复现；这些分析保留各自预先声明的队列和科学适用边界。
 
 ## 🔍 适用范围与假设
 
@@ -278,4 +254,4 @@ python -m pytest tests
 
 ## 🙏 致谢
 
-跟踪流程基于 [SAM2](https://github.com/facebookresearch/sam2) 和 [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)。可选比较模块还使用 Torchvision 的 Faster R-CNN 与 Track-Anything / XMem，资源准备和依赖见[模块说明](experiments/tracking_comparison/README.md)。
+跟踪流程基于 [SAM2](https://github.com/facebookresearch/sam2) 和 [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)。

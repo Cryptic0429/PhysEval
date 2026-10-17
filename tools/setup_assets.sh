@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Download ignored third-party assets for evaluation or component experiments.
+# Download ignored third-party assets for evaluation.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="${ROOT_DIR}/repo"
 SAM2_REPO_DIR="${SAM2_REPO_DIR:-${REPO_DIR}/sam2}"
 SAM2_MODEL="${SAM2_MODEL:-base_plus}"
 YOLO_WEIGHTS="${YOLO_WEIGHTS:-yolov8n.pt}"
-ASSET_MODE=core
 INSTALL_SAM2=0
 INSTALL_EDITABLE=0
 SKIP_YOLO=0
@@ -18,9 +17,6 @@ usage() {
 Usage: bash tools/setup_assets.sh [options]
 
 Options:
-  --mode core|compare
-      core: YOLO and SAM2; compare also includes SAM1 and Track-Anything/XMem.
-      Default: core.
   --sam2-model tiny|small|base_plus|large
       SAM2.1 checkpoint to download. Default: base_plus.
   --sam2-repo-dir PATH
@@ -28,7 +24,7 @@ Options:
   --install-sam2
       Install SAM2 in editable mode with the selected Python environment.
   --install-editable
-      Install SAM2 and, in compare mode, Segment Anything in editable mode,
+      Install SAM2 in editable mode,
       reusing the selected PyTorch build without build isolation.
   --skip-yolo
       Do not download YOLO weights.
@@ -51,7 +47,6 @@ require_value() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --mode) require_value "$1" "${2:-}"; ASSET_MODE="$2"; shift 2 ;;
     --sam2-model) require_value "$1" "${2:-}"; SAM2_MODEL="$2"; shift 2 ;;
     --sam2-repo-dir) require_value "$1" "${2:-}"; SAM2_REPO_DIR="$2"; shift 2 ;;
     --install-sam2) INSTALL_SAM2=1; shift ;;
@@ -62,11 +57,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-
-if [[ "$ASSET_MODE" != core && "$ASSET_MODE" != compare ]]; then
-  echo "Unsupported asset mode: $ASSET_MODE" >&2
-  exit 2
-fi
 
 case "$SAM2_MODEL" in
   tiny) SAM2_CKPT=sam2.1_hiera_tiny.pt; SAM2_CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
@@ -115,25 +105,15 @@ clone_repo() {
   "${GIT_COMMAND[@]}" clone "$url" "$output"
 }
 
-echo "[setup] workspace: $ROOT_DIR; mode: $ASSET_MODE"
+echo "[setup] workspace: $ROOT_DIR"
 clone_repo https://github.com/facebookresearch/sam2.git "$SAM2_REPO_DIR"
 download_file "https://dl.fbaipublicfiles.com/segment_anything_2/092824/${SAM2_CKPT}" "${SAM2_REPO_DIR}/checkpoints/${SAM2_CKPT}"
 if [[ "$SKIP_YOLO" -eq 0 ]]; then
   download_file "https://github.com/ultralytics/assets/releases/download/v8.3.0/${YOLO_WEIGHTS}" "${ROOT_DIR}/${YOLO_WEIGHTS}"
 fi
 
-if [[ "$ASSET_MODE" == compare ]]; then
-  clone_repo https://github.com/facebookresearch/segment-anything.git "$REPO_DIR/segment-anything"
-  clone_repo https://github.com/gaomingqi/Track-Anything.git "$REPO_DIR/Track-Anything"
-  download_file https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth "$REPO_DIR/segment-anything/checkpoints/sam_vit_b_01ec64.pth"
-  download_file https://github.com/hkchengrex/XMem/releases/download/v1.0/XMem.pth "$REPO_DIR/Track-Anything/checkpoints/XMem.pth"
-fi
-
 if [[ "$INSTALL_EDITABLE" -eq 1 ]]; then
   python -m pip install --no-build-isolation -e "$SAM2_REPO_DIR"
-  if [[ "$ASSET_MODE" == compare ]]; then
-    python -m pip install --no-build-isolation -e "$REPO_DIR/segment-anything"
-  fi
 elif [[ "$INSTALL_SAM2" -eq 1 ]]; then
   python -m pip install -e "$SAM2_REPO_DIR"
 fi
@@ -151,6 +131,4 @@ Evaluate:
     --video-root data/t2v_videos/<model_name> --output-dir batch_eval_results/<model_name> \\
     --model-cfg ${SAM2_CFG} --model-weights ${SAM2_REPO_DIR}/checkpoints/${SAM2_CKPT}
 
-Comparison preflight:
-  python physeval.py compare --video-root data/t2v_videos/<model_name> --model-name <model_name> --dry-run
 EOF

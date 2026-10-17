@@ -27,7 +27,7 @@ DEFAULT_DIAGNOSTICS = dict(
 
 
 def extract_quality_evidence(records, masks=None, *, total_frames, bbox_convention="inclusive", config=None):
-    """Same diagnostics for disk-backed core tracks and in-memory comparison masks."""
+    """Extract diagnostics from disk-backed tracks or in-memory masks."""
     from ..io.tracks import normalize_records
     normalized, total = normalize_records({"frames": records, "total_frames": total_frames}, bbox_convention)
     settings = dict(DEFAULT_DIAGNOSTICS)

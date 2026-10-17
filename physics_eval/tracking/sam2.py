@@ -1,16 +1,15 @@
-"""SAM2 inference shared by formal evaluation and component experiments."""
+"""SAM2 inference for physical evaluation."""
 import json
 import shutil
 import sys
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 
-from physics_eval.schemas import MaskTracks, Prompt, VideoInfo
 from .initialization import build_tracking_prompts, load_prompt_manifest
 from physics_eval.reporting import alpha_blend_mask, draw_tracking_result
 from .output import mask_to_bbox, mask_to_centroid, save_mask_png
@@ -609,117 +608,3 @@ def run_tracking(args, prompt_manifest=None):
     print(f"Run config: {run_config_path}")
     return tracking_data
 
-
-def _precision_context(device: str, precision: str):
-    import torch
-
-    if not device.startswith("cuda") or precision == "fp32":
-        return nullcontext()
-    if precision == "auto":
-        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    elif precision == "bf16":
-        dtype = torch.bfloat16
-    elif precision == "fp16":
-        dtype = torch.float16
-    else:
-        raise ValueError(f"Unsupported precision: {precision}")
-    return torch.autocast(device_type="cuda", dtype=dtype)
-
-
-class Sam2Tracker:
-    name = "sam2"
-
-    def __init__(
-        self,
-        *,
-        repo: Path,
-        model_config: str,
-        checkpoint: Path,
-        device: str,
-        precision: str = "auto",
-        offload_video_to_cpu: bool = False,
-        offload_state_to_cpu: bool = False,
-    ) -> None:
-        if not repo.exists():
-            raise FileNotFoundError(f"SAM2 repository not found: {repo}")
-        if not checkpoint.exists():
-            raise FileNotFoundError(f"SAM2 checkpoint not found: {checkpoint}")
-        if str(repo) not in sys.path:
-            sys.path.insert(0, str(repo))
-        from sam2.build_sam import build_sam2_video_predictor
-
-        try:
-            self.predictor = build_sam2_video_predictor(model_config, str(checkpoint), device=device)
-        except TypeError:
-            self.predictor = build_sam2_video_predictor(model_config, str(checkpoint))
-        self.device = device
-        self.precision = precision
-        self.offload_video_to_cpu = offload_video_to_cpu
-        self.offload_state_to_cpu = offload_state_to_cpu
-
-    def track(self, info: VideoInfo, prompts: list[Prompt]) -> MaskTracks:
-        import torch
-
-        if not prompts:
-            raise ValueError("SAM2 received no prompts.")
-        init_frames = {prompt.frame_idx for prompt in prompts}
-        if len(init_frames) != 1:
-            raise ValueError("Comparison protocol requires all objects to use one common initialization frame.")
-        init_frame = next(iter(init_frames))
-        context = lambda: _precision_context(self.device, self.precision)
-        @contextmanager
-        def inference_context():
-            with torch.inference_mode(), context():
-                yield
-
-        state = initialize_predictor_state(
-            self.predictor,
-            frames_dir=info.frames_dir,
-            offload_video_to_cpu=self.offload_video_to_cpu,
-            offload_state_to_cpu=self.offload_state_to_cpu,
-            prompts=[{
-                "frame_idx": prompt.frame_idx,
-                "obj_id": prompt.obj_id,
-                "point": prompt.point,
-                "positive_points": [prompt.point],
-                "negative_points": prompt.negative_points,
-                "label": 1,
-                "box": prompt.box,
-            } for prompt in prompts],
-            inference_context_factory=inference_context,
-        )
-
-        tracks: MaskTracks = {prompt.obj_id: {} for prompt in prompts}
-        self._propagate(state, tracks, init_frame, reverse=False, context=context)
-        if init_frame > 0:
-            self._propagate(state, tracks, init_frame, reverse=True, context=context)
-        return tracks
-
-    def _propagate(
-        self,
-        state: Any,
-        tracks: MaskTracks,
-        start_frame: int,
-        *,
-        reverse: bool,
-        context: Any,
-    ) -> None:
-        import torch
-
-        @contextmanager
-        def inference_context():
-            with torch.inference_mode(), context():
-                yield
-
-        iterator = propagate_in_video_with_context(
-            self.predictor,
-            state,
-            start_frame_idx=start_frame,
-            reverse=reverse,
-            inference_context_factory=inference_context,
-            strict_reverse=True,
-        )
-        for frame_idx, object_ids, mask_logits in iterator:
-            for position, object_id in enumerate(object_ids):
-                mask = (mask_logits[position] > 0.0).detach().cpu().numpy().squeeze().astype(bool)
-                tracks.setdefault(int(object_id), {})[int(frame_idx)] = mask

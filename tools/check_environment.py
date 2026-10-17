@@ -27,18 +27,11 @@ MODULES = {
     "hydra-core": "hydra",
     "iopath": "iopath",
     "pillow": "PIL",
-    "PyYAML": "yaml",
-    "progressbar2": "progressbar",
-    "gdown": "gdown",
-    "GitPython": "git",
-    "hickle": "hickle",
-    "psutil": "psutil",
-    "tensorboard": "tensorboard",
 }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Check PhysEval comparison dependencies and local assets.")
+    parser = argparse.ArgumentParser(description="Check PhysEval evaluation dependencies and local assets.")
     parser.add_argument("--project-root", default=str(PROJECT_ROOT))
     return parser.parse_args(argv)
 
@@ -54,8 +47,8 @@ def run(args: argparse.Namespace) -> int:
     root = Path(args.project_root).expanduser().resolve()
     missing = []
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
-    if sys.version_info[:2] not in {(3, 10), (3, 11)}:
-        print("[warn] Python 3.10 or 3.11 is recommended for SAM2 + Track-Anything compatibility.")
+    if sys.version_info < (3, 10):
+        print("[warn] Python 3.10 or newer is required.")
     for distribution, module_name in MODULES.items():
         try:
             module = importlib.import_module(module_name)
@@ -78,10 +71,6 @@ def run(args: argparse.Namespace) -> int:
         "YOLOv8n": root / "yolov8n.pt",
         "SAM2 repo": root / "repo" / "sam2",
         "SAM2 checkpoint": root / "repo" / "sam2" / "checkpoints" / "sam2.1_hiera_base_plus.pt",
-        "Segment Anything repo": root / "repo" / "segment-anything",
-        "SAM1 checkpoint": root / "repo" / "segment-anything" / "checkpoints" / "sam_vit_b_01ec64.pth",
-        "Track-Anything repo": root / "repo" / "Track-Anything",
-        "XMem checkpoint": root / "repo" / "Track-Anything" / "checkpoints" / "XMem.pth",
     }
     missing_assets = []
     for label, path in assets.items():
@@ -95,7 +84,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"Missing Python dependencies: {', '.join(missing)}")
     if missing_assets:
         print(f"Missing assets: {', '.join(missing_assets)}")
-        print("Run from the PhysEval project root: bash tools/setup_assets.sh --mode compare --install-editable")
+        print("Run from the PhysEval project root: bash tools/setup_assets.sh --install-sam2")
     return 1 if missing or missing_assets else 0
 
 

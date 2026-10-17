@@ -1,6 +1,6 @@
 # Migration coverage
 
-Every original project file has a current owner: 67 Python files, 2 Shell scripts, and 24 benchmark/configuration/documentation/repository files. Package initialization files are included. Two macOS .DS_Store files and generated caches are excluded.
+This table records the retained evaluation files from the architecture migration. The optional detector/tracker component experiment and its dedicated dependencies, tools, and tests were removed on 2026-10-17.
 
 This table tracks capability ownership, not one-to-one renames. Wrapper commands were merged. Numeric algorithms, registry keys and output contracts are protected by regression tests. Formal initialization intentionally fixes YOLO then motion and adds fallback for insufficient required targets.
 
@@ -22,31 +22,6 @@ This table tracks capability ownership, not one-to-one renames. Wrapper commands
 | benchmark/metadata/csv/phys_t2v_bench_prompts__Summary.csv | [benchmark/metadata/csv/phys_t2v_bench_prompts__Summary.csv](../benchmark/metadata/csv/phys_t2v_bench_prompts__Summary.csv) | Preserved in place |
 | benchmark/metadata/phys_t2v_bench_metadata.xlsx | [benchmark/metadata/phys_t2v_bench_metadata.xlsx](../benchmark/metadata/phys_t2v_bench_metadata.xlsx) | Preserved in place |
 | benchmark/metadata/phys_t2v_bench_prompts.xlsx | [benchmark/metadata/phys_t2v_bench_prompts.xlsx](../benchmark/metadata/phys_t2v_bench_prompts.xlsx) | Preserved in place |
-| compare/.gitattributes | [.gitattributes](../.gitattributes) | Migrated / merged |
-| compare/.gitignore | [compare/.gitignore](../compare/.gitignore) | Preserved in place |
-| compare/README.md | [experiments/tracking_comparison/README.md](../experiments/tracking_comparison/README.md) | Migrated / merged |
-| compare/physeval_compare/__init__.py | [experiments/tracking_comparison/__init__.py](../experiments/tracking_comparison/__init__.py) | Migrated / merged |
-| compare/physeval_compare/config.py | [experiments/tracking_comparison/config.py](../experiments/tracking_comparison/config.py) | Migrated / merged |
-| compare/physeval_compare/detectors.py | [physics_eval/tracking/detectors.py](../physics_eval/tracking/detectors.py) | Migrated / merged |
-| compare/physeval_compare/io_utils.py | [physics_eval/io/metadata.py](../physics_eval/io/metadata.py), [physics_eval/io/video.py](../physics_eval/io/video.py), [physics_eval/io/reports.py](../physics_eval/io/reports.py), [physics_eval/tracking/video.py](../physics_eval/tracking/video.py) | Migrated / merged |
-| compare/physeval_compare/metrics.py | [experiments/tracking_comparison/metrics.py](../experiments/tracking_comparison/metrics.py) | Migrated / merged |
-| compare/physeval_compare/output.py | [experiments/tracking_comparison/output.py](../experiments/tracking_comparison/output.py) | Migrated / merged |
-| compare/physeval_compare/runner.py | [experiments/tracking_comparison/runner.py](../experiments/tracking_comparison/runner.py) | Migrated / merged |
-| compare/physeval_compare/summary.py | [experiments/tracking_comparison/summary.py](../experiments/tracking_comparison/summary.py) | Migrated / merged |
-| compare/physeval_compare/trackers.py | [physics_eval/tracking/sam2.py](../physics_eval/tracking/sam2.py), [physics_eval/tracking/tam.py](../physics_eval/tracking/tam.py) | Migrated / merged |
-| compare/physeval_compare/types.py | [physics_eval/schemas.py](../physics_eval/schemas.py) | Migrated / merged |
-| compare/requirements.txt | [requirements-compare.txt](../requirements-compare.txt) | Migrated / merged |
-| compare/scripts/check_cuda_devices.py | [tools/check_gpu.py](../tools/check_gpu.py) | Migrated / merged |
-| compare/scripts/check_environment.py | [tools/check_environment.py](../tools/check_environment.py) | Migrated / merged |
-| compare/scripts/cleanup_shard_outputs.py | [tools/clean_comparison_outputs.py](../tools/clean_comparison_outputs.py) | Migrated / merged |
-| compare/scripts/run_compare.py | [physics_eval/cli.py](../physics_eval/cli.py), [experiments/tracking_comparison/runner.py](../experiments/tracking_comparison/runner.py) | Migrated / merged |
-| compare/scripts/setup_compare_assets.sh | [tools/setup_assets.sh](../tools/setup_assets.sh) | Migrated / merged |
-| compare/scripts/summarize_compare.py | [physics_eval/cli.py](../physics_eval/cli.py), [experiments/tracking_comparison/summary.py](../experiments/tracking_comparison/summary.py) | Migrated / merged |
-| compare/scripts/summarize_cross_model.py | [experiments/tracking_comparison/cross_model_summary.py](../experiments/tracking_comparison/cross_model_summary.py) | Migrated / merged |
-| compare/tests/__init__.py | [tests/__init__.py](../tests/__init__.py) | Migrated / merged |
-| compare/tests/test_config_and_metrics.py | [tests/test_comparison_metrics.py](../tests/test_comparison_metrics.py) | Migrated / merged |
-| compare/tests/test_io_and_prompts.py | [tests/test_comparison_inputs.py](../tests/test_comparison_inputs.py) | Migrated / merged |
-| compare/tests/test_runner_cleanup.py | [tests/test_comparison_runner.py](../tests/test_comparison_runner.py) | Migrated / merged |
 | configs/scoring/grouped_v2_candidate.json | [configs/scoring/grouped_v2_candidate.json](../configs/scoring/grouped_v2_candidate.json) | Preserved in place |
 | configs/scoring/legacy_v1.json | [configs/scoring/legacy_v1.json](../configs/scoring/legacy_v1.json) | Preserved in place |
 | physeval.py | [physeval.py](../physeval.py), [physics_eval/cli.py](../physics_eval/cli.py) | Migrated / merged |
@@ -84,11 +59,10 @@ This table tracks capability ownership, not one-to-one renames. Wrapper commands
 | physics_eval/utils/tracking.py | [physics_eval/io/tracks.py](../physics_eval/io/tracks.py) | Migrated / merged |
 | physics_eval/utils/tracking_init.py | [physics_eval/tracking/initialization.py](../physics_eval/tracking/initialization.py), [physics_eval/schemas.py](../physics_eval/schemas.py) | Migrated / merged |
 | physics_eval/utils/tracking_quality.py | [physics_eval/quality/tracking_checks.py](../physics_eval/quality/tracking_checks.py) | Migrated / merged |
-| requirements-compare.txt | [requirements-compare.txt](../requirements-compare.txt) | Preserved in place |
 | requirements.txt | [requirements.txt](../requirements.txt) | Preserved in place |
 | scripts/analyze_qmask_protocols.py | [experiments/historical/qmask_protocol_comparison.py](../experiments/historical/qmask_protocol_comparison.py) | Migrated / merged |
 | scripts/analyze_scoring_sensitivity.py | [experiments/scoring_sensitivity.py](../experiments/scoring_sensitivity.py) | Migrated / merged |
-| scripts/detection/yolo_init.py | [physics_eval/tracking/yolo.py](../physics_eval/tracking/yolo.py), [physics_eval/tracking/detectors.py](../physics_eval/tracking/detectors.py) | Migrated / merged |
+| scripts/detection/yolo_init.py | [physics_eval/tracking/yolo.py](../physics_eval/tracking/yolo.py) | Migrated / merged |
 | scripts/preflight_open_video_validation.py | [validation/open_video_preflight.py](../validation/open_video_preflight.py) | Migrated / merged |
 | scripts/quality/check_mask_area_stability.py | [tools/inspect_masks.py](../tools/inspect_masks.py), [physics_eval/quality/inspection.py](../physics_eval/quality/inspection.py), [physics_eval/reporting.py](../physics_eval/reporting.py) | Migrated / merged |
 | scripts/report_io.py | [physics_eval/io/reports.py](../physics_eval/io/reports.py) | Migrated / merged |

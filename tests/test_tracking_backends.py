@@ -66,10 +66,10 @@ def _args(tmp_path):
 
 
 def test_manifest_prompts_bypass_detector_and_keep_all_points(tmp_path, monkeypatch):
-    from physics_eval.tracking import detectors, motion
+    from physics_eval.tracking import yolo, motion
     def no_detection(*args, **kwargs):
         pytest.fail("metadata prompts must bypass both automatic detectors")
-    monkeypatch.setattr(detectors, "detect_yolo_prompts", no_detection)
+    monkeypatch.setattr(yolo, "detect_yolo_prompts", no_detection)
     monkeypatch.setattr(motion, "detect_moving_object_prompts", no_detection)
     manifest_path = tmp_path / "prompts.json"
     manifest_path.write_text(json.dumps({
@@ -225,47 +225,6 @@ def test_mocked_sam2_preserves_multiobject_outputs_and_provenance(tmp_path, monk
     assert config["auto_init_detector"] == "yolo_then_motion"
     assert config["batch_initialization"] == manifest
     assert config["precision_policy"]["resolved"] == "fp32"
-
-
-def test_comparison_backend_keeps_common_frame_and_reverse_policy(tmp_path, monkeypatch):
-    from contextlib import nullcontext
-    from physics_eval.schemas import Prompt, VideoInfo
-    from physics_eval.tracking.sam2 import Sam2Tracker
-
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(inference_mode=nullcontext))
-    class Tensor:
-        def __init__(self, value):
-            self.value = np.asarray(value)
-        def __gt__(self, threshold):
-            return Tensor(self.value > threshold)
-        def detach(self):
-            return self
-        def cpu(self):
-            return self
-        def numpy(self):
-            return self.value
-    injected = []
-    class Predictor:
-        def init_state(self, **kwargs):
-            return {}
-        def add_new_points_or_box(self, **kwargs):
-            injected.append(kwargs)
-        def propagate_in_video(self, state, start_frame_idx, reverse):
-            yield start_frame_idx, [1], [Tensor([[0, 1] if reverse else [1, 0]])]
-    tracker = Sam2Tracker.__new__(Sam2Tracker)
-    tracker.predictor = Predictor()
-    tracker.device, tracker.precision = "cpu", "fp32"
-    tracker.offload_video_to_cpu = tracker.offload_state_to_cpu = False
-    info = VideoInfo(tmp_path / "video.mp4", 30.0, 2, 1, 3, tmp_path)
-    prompt = Prompt(1, 1, [0, 0], [0, 0, 1, 0], 1.0, "yolo", negative_points=[[1, 0]])
-    tracks = tracker.track(info, [prompt])
-    np.testing.assert_array_equal(injected[0]["labels"], [1, 0])
-    # Comparison historically keeps the reverse-pass mask at the shared frame.
-    np.testing.assert_array_equal(tracks[1][1], [False, True])
-    second = Prompt(2, 2, [0, 0], [0, 0, 1, 0], 1.0, "yolo")
-    with pytest.raises(ValueError, match="common initialization frame"):
-        tracker.track(info, [prompt, second])
-
 
 
 def test_direct_manual_prompt_keeps_frame_object_label_and_box(tmp_path):
