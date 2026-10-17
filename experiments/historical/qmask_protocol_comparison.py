@@ -30,7 +30,7 @@ def baseline_rows(script: Path, result_root: Path, model: str, output_dir: Path,
     report = json.loads((output_dir / "score_summary.json").read_text(encoding="utf-8"))
     rows = report.get("per_video")
     if not isinstance(rows, list):
-        raise ValueError("Frozen baseline scorer must write score_summary.json with per_video rows")
+        raise ValueError("Baseline scorer must write score_summary.json with per_video rows")
     return {(row["metric"], row["prompt_id"]): row for row in rows}
 
 
@@ -64,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, default=ROOT.parent / "results")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--baseline-scorer", type=Path, help="Optional frozen pre-refactor scorer for regression")
+    parser.add_argument("--baseline-scorer", type=Path, help="Optional reference scorer for regression comparison")
     return parser.parse_args(argv)
 
 

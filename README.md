@@ -4,6 +4,8 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 PhysEval measures how closely generated videos follow quantitative physical constraints. It pairs **500 prompts across 10 physical metrics** with an automatic pipeline that tracks objects, estimates physical quantities, and compares them with the targets specified in the benchmark.
 
 [Benchmark](#-benchmark-data) · [Setup](#-environment-setup) · [Quick Start](#-running-evaluation) · [Scoring Guide](SCORING_USAGE.md) · [Batch Guide](BATCH_USAGE.md) · [Architecture](docs/ARCHITECTURE.md)
@@ -102,7 +104,7 @@ Generated videos → YOLO initialization → motion fallback when needed → SAM
                  → Quality-aware scoring and model reports (score)
 ```
 
-YOLO is used only to initialize the target prompts; SAM2 propagates the masks through the video. An exception, no usable detection, or an incomplete target count triggers motion fallback. Motion must also supply the required count or the sample is recorded as an initialization failure. `run_config.json` and `tracking_points.json` record the fixed policy, the adopted initialization source (`auto_yolo` or `auto_motion`), and the fallback reason. There is no detector-selection option in formal `eval`.
+YOLO is used only to initialize the target prompts; SAM2 propagates the masks through the video. An exception, no usable detection, or an incomplete target count triggers motion fallback. Motion must also supply the required count or the sample is recorded as an initialization failure. `run_config.json` and `tracking_points.json` record the fixed policy, the adopted initialization source (`auto_yolo` or `auto_motion`), and the fallback reason.
 
 ### 1. Try one video
 
@@ -141,7 +143,7 @@ python physeval.py score \
   --weak-valid-multiplier 0.8
 ```
 
-The explicit `0.8` is the paper-specified weight for `weak_valid` estimates and is also the CLI default. The scorer checks benchmark completeness by default. For an explicitly partial smoke test, add `--metadata none`; treat that report as exploratory.
+The explicit `0.8` is the paper-specified weight for `weak_valid` estimates and is also the CLI default. The scorer checks benchmark completeness by default. For a partial smoke test, add `--metadata none`.
 
 ## 📊 Scoring and Reports
 
@@ -215,17 +217,18 @@ PhysEval/
 ├── tools/                        # Asset setup, environment checks and maintenance
 ├── tests/                        # Unit, synthetic and integration checks
 ├── benchmark/metadata/           # Released workbooks and CSVs
-├── configs/scoring/              # Versioned Q_mask protocols
+├── configs/scoring/              # Q_mask scoring protocol configurations
 ├── requirements*.txt             # Core and test dependencies
-└── docs/ARCHITECTURE.md           # Responsibilities and migration coverage
+├── LICENSE                       # MIT license
+└── docs/ARCHITECTURE.md           # Module responsibilities and workflow
 ```
 
-The [architecture guide](docs/ARCHITECTURE.md) maps the complete workflow and the migrated source files. Experimental and validation commands are explicit; `eval` does not run them automatically.
+The [architecture guide](docs/ARCHITECTURE.md) describes the complete workflow and module responsibilities. Experimental and validation commands are explicit; `eval` does not run them automatically.
 
 ## 🧪 Research, Validation and Maintenance
 
 ```bash
-# Analyze saved results without retracking (the original six-model/3,000-video cohort).
+# Analyze saved results without retracking (the six-model/3,000-video cohort).
 python physeval.py analyze-sensitivity --results-root ../results --output-dir runs/sensitivity
 
 # Controlled mask checks, including a stable wrong-target negative control.
@@ -244,7 +247,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-mask-protocols` reproduces historical Q_mask analyses. These analyses retain their declared cohorts and scientific limitations.
+`analyze-mask-protocols` compares Q_mask protocol configurations on saved results.
 
 ## 🔍 Scope and Assumptions
 
@@ -255,3 +258,7 @@ Camera motion, depth changes, perspective variation, occlusion, deformation, rot
 ## 🙏 Acknowledgements
 
 The tracking pipeline builds on [SAM2](https://github.com/facebookresearch/sam2) and [Ultralytics YOLO](https://github.com/ultralytics/ultralytics).
+
+## 📄 License
+
+PhysEval is released under the [MIT License](LICENSE). Third-party model assets keep their own licenses: SAM2 is distributed under Apache-2.0 and Ultralytics YOLO under AGPL-3.0.
