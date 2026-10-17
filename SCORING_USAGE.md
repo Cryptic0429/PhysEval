@@ -26,7 +26,7 @@ Useful options:
 | `--tau 0.35` or `--tolerance-json tolerances.json` | Override physical-error tolerances for a sensitivity analysis. |
 | `--weak-valid-multiplier 0.6` | Change the weak-validity weight for a sensitivity analysis. |
 
-The PhysEval scoring protocol defined in the paper uses continuous mask quality and treats failed tracking checks as hard exclusions. Threshold and policy options are listed by `python physeval.py score --help`; use supported overrides only for explicitly reported sensitivity analyses. The default grouped protocol requires continuous mask weighting and hard-fail tracking. Alternative legacy mask/tracking policies require an explicitly selected historical protocol and change the paper's scoring settings.
+The PhysEval scoring protocol defined in the paper uses continuous mask quality and treats failed tracking checks as hard exclusions. Threshold and policy options are listed by `python physeval.py score --help`; use supported overrides only for explicitly reported sensitivity analyses. The default grouped protocol requires continuous mask weighting and hard-fail tracking. Alternative mask/tracking policies must be selected explicitly and change the paper's scoring settings.
 
 ## Which videos receive a score?
 
@@ -38,7 +38,7 @@ The scorer applies checks in order:
 
 The paper defines the mask-quality score, **Q_mask**, by averaging component scores within three groups—shape and scale, segmentation consistency, and local completeness—then weighting the groups equally and averaging across required objects. Q_mask supplies the `mask_quality_score` term in the formula below. Centroid jumps are recorded for diagnosis but do not enter this multiplier. The mask score is a heuristic for two-dimensional track reliability, not a probability that tracking is correct.
 
-Missing evidence for a required mask component or object makes the score unavailable; it is never replaced with a perfect score. A measured mask score of zero remains a valid measurement and does not change whether the video passed the two hard checks.
+Missing evidence for a required mask component or object makes the score unavailable rather than substituting a perfect score. A measured mask score of zero remains a valid measurement and does not change whether the video passed the two hard checks.
 
 ## Score formula
 
@@ -86,24 +86,24 @@ With `--metric`, the final directory is the metric name instead of `all_metrics`
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons. |
 | `plots/` | Score and discard charts, unless `--no-plots` is used. |
 
-The scorer checks result IDs against benchmark metadata by default. If required scoring evidence is missing, or result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default. Fix the inputs before comparing model scores.
+The scorer checks result IDs against benchmark metadata by default. If required scoring evidence is missing, or result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
 
 ## Saved-evidence research analyses
 
 The formal scorer is implemented in `physics_eval/scoring.py`; experiment modules call its explicit data interface without retracking or replacing its loaders. Use a fresh output directory for each analysis:
 
 ```bash
-# One-factor sensitivity: fixed original cohort of six models / 3,000 results.
+# One-factor sensitivity over the saved six-model / 3,000-result cohort.
 python physeval.py analyze-sensitivity \
   --results-root ../results \
   --output-dir runs/scoring_sensitivity
 
-# Historical and candidate Q_mask protocol comparisons.
+# Q_mask protocol comparisons.
 python physeval.py analyze-mask-protocols \
   --results-root ../results \
-  --output-dir runs/historical_mask_protocols
+  --output-dir runs/mask_protocol_comparison
 ```
 
-Sensitivity preserves saved trajectories and physical measurements, varies Q_mask gamma, weak-valid weights, or the four applicable R² consumers, and retains the spring period-confidence rule. Its original cohort assertions are intentional; it is not a general arbitrary-size analysis command. Historical comparisons preserve protocol identity/hash and the optional `--baseline-scorer path/to/frozen_score.py` CLI regression check. Candidate parameter changes are not evidence of improved segmentation and have not been independently calibrated against manual labels or ground truth.
+Sensitivity analysis reuses saved trajectories and physical measurements while varying Q_mask gamma, weak-valid weights, or the four applicable R² consumers, and retains the spring period-confidence rule; it expects the saved six-model cohort. Protocol comparisons preserve protocol identity/hash and support the optional `--baseline-scorer path/to/reference_score.py` regression check against a reference scorer. Candidate parameter changes are exploratory and have not been calibrated against manual labels or ground truth.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

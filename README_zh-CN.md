@@ -4,6 +4,8 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 PhysEval 用于衡量生成视频对定量物理约束的遵循程度。项目提供覆盖 **10 项物理指标的 500 组提示词与元数据**，通过自动跟踪、物理量估计和目标值比较，评测文生视频模型的物理准确性。
 
 [基准数据](#-基准数据) · [环境配置](#-环境配置) · [快速开始](#-运行评测) · [评分说明](SCORING_USAGE.md) · [批量使用说明](BATCH_USAGE.md) · [代码架构](docs/ARCHITECTURE.md)
@@ -102,7 +104,7 @@ data/t2v_videos/my_model/
          → 结合测量质量评分并生成模型报告（score）
 ```
 
-YOLO 只负责提供初始化提示，后续由 SAM2 传播掩膜。YOLO 报错、没有可用检测或目标数量不足时触发运动检测回退；运动检测也必须提供所需数量，否则记录初始化失败。`run_config.json` 和 `tracking_points.json` 保存固定策略、最终采用的初始化来源（`auto_yolo` 或 `auto_motion`）以及回退原因。正式 `eval` 无需选择检测器。
+YOLO 只负责提供初始化提示，后续由 SAM2 传播掩膜。YOLO 报错、没有可用检测或目标数量不足时触发运动检测回退；运动检测也必须提供所需数量，否则记录初始化失败。`run_config.json` 和 `tracking_points.json` 保存固定策略、最终采用的初始化来源（`auto_yolo` 或 `auto_motion`）以及回退原因。
 
 ### 1. 先运行一个视频
 
@@ -141,7 +143,7 @@ python physeval.py score \
   --weak-valid-multiplier 0.8
 ```
 
-显式指定的 `0.8` 是论文规定的 `weak_valid` 估计权重，也是命令行默认值。评分程序默认检查基准结果的完整性。如仅为部分样本做流程检查，可添加 `--metadata none`，并将报告作为探索性结果解读。
+显式指定的 `0.8` 是论文规定的 `weak_valid` 估计权重，也是命令行默认值。评分程序默认检查基准结果的完整性。如仅为部分样本做流程检查，可添加 `--metadata none`。
 
 ## 📊 评分与报告
 
@@ -215,17 +217,18 @@ PhysEval/
 ├── tools/                        # 资源准备、环境诊断和维护
 ├── tests/                        # 单元、合成对照和集成检查
 ├── benchmark/metadata/           # 发布的工作簿与 CSV
-├── configs/scoring/              # 版本化 Q_mask 规则
+├── configs/scoring/              # Q_mask 评分规则配置
 ├── requirements*.txt             # 核心与测试依赖
-└── docs/ARCHITECTURE.md           # 职责说明和迁移覆盖表
+├── LICENSE                       # MIT 协议
+└── docs/ARCHITECTURE.md           # 模块职责与工作流程
 ```
 
-[代码架构说明](docs/ARCHITECTURE.md)覆盖完整流程及源码迁移关系。实验与验证通过独立命令运行，`eval` 不会自动执行这些步骤。
+[代码架构说明](docs/ARCHITECTURE.md)描述完整工作流程与模块职责。实验与验证通过独立命令运行，`eval` 不会自动执行这些步骤。
 
 ## 🧪 研究分析、验证与维护
 
 ```bash
-# 基于已保存结果分析评分敏感性，不重新跟踪；保留原六模型/3,000 视频队列要求。
+# 基于已保存结果分析评分敏感性，不重新跟踪（六模型/3,000 视频队列）。
 python physeval.py analyze-sensitivity --results-root ../results --output-dir runs/sensitivity
 
 # 可控掩膜对照，包含稳定跟错目标的负对照。
@@ -244,7 +247,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-mask-protocols` 用于历史 Q_mask 规则复现；这些分析保留各自预先声明的队列和科学适用边界。
+`analyze-mask-protocols` 用于在已保存结果上比较不同 Q_mask 规则配置。
 
 ## 🔍 适用范围与假设
 
@@ -255,3 +258,7 @@ python -m pytest tests
 ## 🙏 致谢
 
 跟踪流程基于 [SAM2](https://github.com/facebookresearch/sam2) 和 [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)。
+
+## 📄 开源协议
+
+PhysEval 基于 [MIT 协议](LICENSE)开源。第三方模型资源遵循各自协议：SAM2 采用 Apache-2.0，Ultralytics YOLO 采用 AGPL-3.0。

@@ -4,7 +4,7 @@
 
 This guide covers the executable pipeline behind the evaluation protocol described in the PhysEval paper: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
 
-The batch stage records measurability checks and estimates each video's physical quantity; model-level scoring applies the gates and is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability is retained as a soft score multiplier.
+The batch stage records measurability checks and estimates each video's physical quantity; model-level scoring applies the gates and is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability enters the score as a soft multiplier.
 
 Use the unified public entry point from the repository root:
 
@@ -24,7 +24,7 @@ init policy YOLO first, motion fallback (fixed)
 yolo model  yolov8n.pt, if it exists under workspace root
 ```
 
-The automatic metadata default is retained for local workspaces. For the released 500-prompt benchmark, pass the repository workbook explicitly:
+Metadata auto-discovery is convenient for local workspaces. For the released 500-prompt benchmark, pass the repository workbook explicitly:
 
 ```text
 benchmark/metadata/phys_t2v_bench_metadata.xlsx
@@ -176,7 +176,7 @@ YOLO target candidates
 
 YOLO candidate generation applies the target-class, confidence, and geometry filters. A detector exception, empty usable candidates, or an incomplete object count triggers motion fallback. For example, a two-object task cannot proceed with only one YOLO prompt. If motion also fails to provide the required count, the sample is recorded as an initialization failure.
 
-The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. There is no user-selectable motion-only or YOLO-only mode in formal evaluation.
+The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. Formal evaluation always follows this fixed protocol.
 
 The adopted source is saved as `auto_yolo` or `auto_motion`; motion candidates retain `yolo_fallback_reason`. Inspect `tracking_points.json` and `run_config.json` to distinguish attempted YOLO detection from adopted YOLO initialization. Keep these records when reporting how often each path was used.
 
@@ -186,7 +186,7 @@ Use a specific YOLO weights file when required by a declared experimental setup:
 python physeval.py eval --yolo-weights yolov8n.pt
 ```
 
-Manual prompt metadata remains supported. Renderer ground-truth initialization requires explicit `--allow-renderer-gt-init`, retains its supervision provenance, and must be reported separately from automatic evaluation. Reusing tracks or estimating from existing tracks does not rerun initialization.
+Manual prompt metadata is also supported. Renderer ground-truth initialization requires the explicit `--allow-renderer-gt-init` flag, records its supervision provenance, and must be reported separately from automatic evaluation. Reusing tracks or estimating from existing tracks does not rerun initialization.
 
 ## Mask QC Behavior
 
