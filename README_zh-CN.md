@@ -8,6 +8,8 @@
 
 PhysEval 用于衡量生成视频对定量物理约束的遵循程度。项目提供覆盖 **10 项物理指标的 500 组提示词与元数据**，通过自动跟踪、物理量估计和目标值比较，评测文生视频模型的物理准确性。
 
+![PhysEval 总览：物理指标套件、提示词与元数据构建、生成视频与自动评测流程](assets/figure1_overview.png)
+
 [基准数据](#-基准数据) · [环境配置](#-环境配置) · [快速开始](#-运行评测) · [评分说明](SCORING_USAGE.md) · [批量使用说明](BATCH_USAGE.md) · [代码架构](docs/ARCHITECTURE.md)
 
 ---
@@ -216,6 +218,7 @@ PhysEval/
 ├── validation/                   # 真实视频预检和可控掩膜验证
 ├── tools/                        # 资源准备、环境诊断和维护
 ├── tests/                        # 单元、合成对照和集成检查
+├── assets/                       # README 使用的论文配图
 ├── benchmark/metadata/           # 发布的工作簿与 CSV
 ├── configs/scoring/              # Q_mask 评分规则配置
 ├── requirements*.txt             # 核心与测试依赖
