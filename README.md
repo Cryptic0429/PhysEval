@@ -8,6 +8,8 @@
 
 PhysEval measures how closely generated videos follow quantitative physical constraints. It pairs **500 prompts across 10 physical metrics** with an automatic pipeline that tracks objects, estimates physical quantities, and compares them with the targets specified in the benchmark.
 
+![PhysEval overview: physical metric suite, prompt and metadata construction, generated videos, and the automatic evaluation pipeline](assets/figure1_overview.png)
+
 [Benchmark](#-benchmark-data) · [Setup](#-environment-setup) · [Quick Start](#-running-evaluation) · [Scoring Guide](SCORING_USAGE.md) · [Batch Guide](BATCH_USAGE.md) · [Architecture](docs/ARCHITECTURE.md)
 
 ---
@@ -216,6 +218,7 @@ PhysEval/
 ├── validation/                   # Open-video preflight and controlled masks
 ├── tools/                        # Asset setup, environment checks and maintenance
 ├── tests/                        # Unit, synthetic and integration checks
+├── assets/                       # Paper figures used by the README
 ├── benchmark/metadata/           # Released workbooks and CSVs
 ├── configs/scoring/              # Q_mask scoring protocol configurations
 ├── requirements*.txt             # Core and test dependencies
