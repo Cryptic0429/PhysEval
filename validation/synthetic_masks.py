@@ -12,7 +12,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from physics_eval.quality.mask_evidence import extract_quality_evidence
-from physics_eval.quality.protocol import load_protocol
+from physics_eval.quality.config import load_mask_config
 from physics_eval.quality.mask_score import compute_qmask
 
 
@@ -43,9 +43,9 @@ def run(args: argparse.Namespace):
             errors.append(float(np.linalg.norm(np.array(center)-[34.5+i,34.5])))
             ious.append(float(np.count_nonzero(mask & target)/np.count_nonzero(mask | target)))
         evidence=extract_quality_evidence(records,masks,total_frames=40)
-        grouped_score=compute_qmask(evidence,load_protocol(),[1])["score"]
+        mask_score=compute_qmask(evidence,load_mask_config())["score"]
         rows.append({"case":case,"centroid_rmse_px":float(np.sqrt(np.mean(np.square(errors)))),
-                     "ground_truth_mask_iou":float(np.mean(ious)),"grouped_v2_candidate_score":grouped_score})
+                     "ground_truth_mask_iou":float(np.mean(ious)),"mask_quality_score":mask_score})
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with args.output.open("w",encoding="utf-8-sig",newline="") as handle:
         writer=csv.DictWriter(handle,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)

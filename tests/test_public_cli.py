@@ -40,6 +40,8 @@ def test_public_help_does_not_require_third_party_packages(command):
     assert completed.returncode == 0, completed.stderr
     if command == "eval":
         assert "--detector" not in completed.stdout
+    else:
+        assert "--scoring-protocol" not in completed.stdout
 
 
 def test_public_defaults_keep_mask_evidence_and_explicit_run_options(tmp_path):

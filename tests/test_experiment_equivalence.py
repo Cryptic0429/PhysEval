@@ -1,76 +1,144 @@
-"""CPU regression checks for saved-evidence experiments and their subprocess boundary."""
+"""Independent reference replay, saved-evidence sensitivity and mask controls."""
 from __future__ import annotations
 
 import csv
+import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
+import random
+import subprocess
 import sys
 
 import pytest
 
-from experiments.historical.qmask_protocol_comparison import baseline_rows, protocols
+from experiments.scoring_sensitivity import scenarios
 from physics_eval import scoring
 from physics_eval.cli import parse_score_args
+from physics_eval.quality.config import load_mask_config
 from validation import synthetic_masks
 
-
 ROOT = Path(__file__).resolve().parents[1]
+REFERENCE = ROOT / "tests/fixtures/reference_score.py"
 
 
-def _write_results(root: Path) -> list[Path]:
+def reference_scorer():
+    spec = importlib.util.spec_from_file_location("reference_score", REFERENCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def assert_reference_fields(actual, expected):
+    """Compare shared data recursively; reporting adds separate gate diagnostics."""
+    if isinstance(actual, dict):
+        for key in actual.keys() & expected.keys():
+            assert_reference_fields(actual[key], expected[key])
+    elif isinstance(actual, list):
+        assert len(actual) == len(expected)
+        for a, b in zip(actual, expected):
+            assert_reference_fields(a, b)
+    else:
+        assert actual == expected
+
+
+def test_reference_is_original_source_with_only_import_path_adapted():
+    source = REFERENCE.read_bytes().replace(
+        b"from physics_eval.quality.tracking_checks import analyze_tracking_quality_file",
+        b"from physics_eval.utils.tracking_quality import analyze_tracking_quality_file",
+    )
+    assert hashlib.sha256(source).hexdigest() == "c458b99a97a335e1504b4f599ac10ee89928a8268d7b0e79c97bffe8155ec7a8"
+
+
+def _write_results(root: Path, count=256) -> list[Path]:
+    rng = random.Random(1742)
+    config = load_mask_config()
     paths = []
-    for index, (status, error, tracking) in enumerate(
-        [("valid", 0.0, "pass"), ("weak_valid", 0.15, "pass"), ("valid", 0.0, "flagged")],
-        start=1,
-    ):
-        path = root / "velocity" / f"V{index:03d}" / "result.json"
+    for index in range(count):
+        metric = ("velocity", "acceleration", "mechanical_energy_conservation", "momentum_conservation_1d")[index % 4]
+        physics = {
+            "Status": ("valid", "weak_valid", "invalid", "failed")[index % 4],
+            "Relative_Error": rng.choice([0., .01, .2, 2., 10.]),
+            "Measured_Value": .8, "Target_Value": 1., "Failure_Reason": "",
+        }
+        if index % 7 == 0:
+            physics.pop("Relative_Error")
+        objects = []
+        for oid in range(1, 1 + index % 3):
+            obj = {"object_id": oid, "decision": rng.choice(["", "keep", "review", None]),
+                   "reasons": rng.choice(["", "large_area_ratio", "low_middle_coverage", "insufficient_valid_middle_frames"])}
+            for name, spec in config["components"].items():
+                progress = rng.choice([0., .25, .5, .999, 1., None])
+                if progress is not None:
+                    obj[name] = spec["good_value"] + progress*(spec["bad_value"]-spec["good_value"])
+            objects.append(obj)
+        path = root / metric / f"P{index:03d}" / "result.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
-            "metric": "velocity", "prompt_id": path.parent.name,
-            "metadata": {"Num_Objects": 1},
-            "tracking_quality": {"status": tracking, "counted_object_ids": [1]},
-            "physics_result": {
-                "Status": status, "Relative_Error": error, "Measured_Value": 1.0,
-                "Failure_Reason": "low_fit_r2" if status == "weak_valid" else "",
-            },
-            "mask_qc": {},
+            "metric": metric, "prompt_id": path.parent.name, "metadata": {"Num_Objects": 2},
+            "tracking_quality": {"status": "flagged" if index % 5 == 0 else "pass"},
+            "physics_result": physics,
+            "mask_qc": {"status": "flagged" if index % 11 == 0 else "pass", "objects": objects},
         }), encoding="utf-8")
         paths.append(path)
     return paths
 
 
-def test_historical_baseline_subprocess_matches_explicit_legacy_scoring(tmp_path):
-    result_root = tmp_path / "results"
-    paths = _write_results(result_root)
-    # The frozen scorer remains an executable input, not an imported module.
-    # This local executable exercises the same stable command contract as a
-    # pre-refactor scorer and makes the regression portable across checkouts.
-    executable = tmp_path / "standalone_scorer.py"
-    executable.write_text(
-        "import sys\n"
-        f"sys.path.insert(0, {str(ROOT)!r})\n"
-        "from physics_eval.cli import parse_score_args\n"
-        "from physics_eval.scoring import run\n"
-        "run(parse_score_args(sys.argv[1:]))\n",
-        encoding="utf-8",
-    )
-    rows = baseline_rows(executable, result_root, "model", tmp_path / "baseline", "none")
+@pytest.mark.parametrize("mask_policy", ["continuous", "penalty", "hard_fail", "ignore"])
+@pytest.mark.parametrize("tracking_policy", ["hard_fail", "penalty", "ignore"])
+def test_scores_and_aggregates_match_independent_reference(tmp_path, mask_policy, tracking_policy):
+    paths = _write_results(tmp_path)
     args = parse_score_args([
-        "--scoring-protocol", "legacy_v1", "--metadata", "none",
-        "--result-root", str(result_root), "--model-name", "model", "--no-plots",
+        "--metadata", "none", "--result-root", str(tmp_path), "--no-plots",
+        "--mask-policy", mask_policy, "--tracking-policy", tracking_policy,
+        "--quality-flag-multiplier", "0.4",
     ])
+    reference = reference_scorer()
+    current_rows, reference_rows = [], []
     for path in paths:
-        current = scoring.score_data(json.loads(path.read_text()), path, scoring.DEFAULT_TOLERANCES, args)
-        baseline = rows[(current["metric"], current["prompt_id"])]
-        assert baseline == current
-    assert rows[("velocity", "V002")]["status_multiplier"] == 0.8
-    assert rows[("velocity", "V003")]["effective_for_score"] is False
+        current = scoring.score_one(path, scoring.DEFAULT_TOLERANCES, args)
+        expected = reference.score_one(path, reference.DEFAULT_TOLERANCES, args)
+        for key in current.keys() & expected.keys():
+            assert current[key] == expected[key], (path, key)
+        current_rows.append(current)
+        reference_rows.append(expected)
+    actual, expected = scoring.summarize(current_rows), reference.summarize(reference_rows)
+    assert_reference_fields(actual, expected)
+    assert actual["n_both_gates_pass"] == expected["n_physics_valid_or_weak"]
+    for a, b in zip(actual["metrics"], expected["metrics"]):
+        assert a["n_both_gates_pass"] == b["n_physics_valid_or_weak"]
 
 
-def test_historical_protocol_order_and_synthetic_negative_control_are_preserved(tmp_path):
-    values = protocols()
-    assert values[0]["protocol_id"] == "legacy_v1"
-    assert len(values) == 13
+def test_cli_reports_match_reference_and_have_no_version_directory(tmp_path):
+    result_root = tmp_path / "results"
+    _write_results(result_root, 24)
+    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    for executable, extra in (
+        ([str(REFERENCE)], ["--output-dir", str(tmp_path / "reference")]),
+        ([str(ROOT / "physeval.py"), "score"], ["--metadata", "none"]),
+    ):
+        subprocess.run([sys.executable, *executable, "--result-root", str(result_root),
+                        "--model-name", "fixture", "--no-plots", *extra],
+                       check=True, capture_output=True, text=True, env=env)
+    output = result_root / "score_reports/all_metrics/score_summary.json"
+    current = json.loads(output.read_text())
+    expected = json.loads((tmp_path / "reference/score_summary.json").read_text())
+    assert_reference_fields(current["summary"], expected["summary"])
+    settings = current["scoring"]
+    assert settings["mask_score_gamma"] == .35 and settings["mask_flag_floor"] == .85
+    assert "mask_quality_config_hash" in settings
+    assert not any("protocol" in key for key in settings)
+
+
+def test_sensitivity_uses_production_baseline_and_keeps_floor():
+    values = scenarios()
+    assert len(values) == 25
+    assert values[0]["gamma"] == load_mask_config()["gamma"] == .35
+    assert all(s["gamma"] == .35 for s in values if s["family"] != "gamma")
+
+
+def test_synthetic_negative_control_reports_the_single_mask_score(tmp_path):
     output = tmp_path / "synthetic.csv"
     synthetic_masks.main(["--output", str(output)])
     with output.open(newline="", encoding="utf-8-sig") as handle:
@@ -79,5 +147,5 @@ def test_historical_protocol_order_and_synthetic_negative_control_are_preserved(
     wrong = rows["stable_wrong_target_30px_offset"]
     assert float(wrong["centroid_rmse_px"]) == 30.0
     assert float(wrong["ground_truth_mask_iou"]) == 0.0
-    assert float(wrong["grouped_v2_candidate_score"]) == 1.0
-    assert float(rows["alternating_width"]["grouped_v2_candidate_score"]) == pytest.approx(0.6700680272108843)
+    assert float(wrong["mask_quality_score"]) == 1.0
+    assert float(rows["alternating_width"]["mask_quality_score"]) == 0.0

@@ -1,10 +1,9 @@
-"""Pure Qmask scoring; missing evidence is distinct from poor evidence."""
+"""Mask reliability: minimum components and objects, with flagged-score floor."""
 from __future__ import annotations
 
 import math
-from statistics import mean
 
-from .protocol import protocol_hash, validate_protocol
+from .config import load_mask_config, mask_config_hash, validate_mask_config
 
 
 def finite(value):
@@ -20,67 +19,67 @@ def component_score(value, spec: dict, gamma: float):
     if value is None:
         return None
     good, bad = spec["good_value"], spec["bad_value"]
-    progress = max(0.0, min(1.0, (value - good) / (bad - good)))
-    return max(0.0, min(1.0, 1.0 - progress ** gamma))
+    if spec["direction"] == "high_bad":
+        if value <= good:
+            return 1.0
+        if value >= bad:
+            return 0.0
+        progress = (value - good) / max(bad - good, 1e-12)
+    else:
+        if value >= good:
+            return 1.0
+        if value <= bad:
+            return 0.0
+        progress = (good - value) / max(good - bad, 1e-12)
+    return min(1.0, max(0.0, 1.0 - math.pow(progress, gamma)))
 
 
-def compute_qmask(evidence: dict, protocol: dict, required_object_ids=None) -> dict:
-    validate_protocol(protocol)
-    legacy = protocol["missing_policy"] == "legacy"
-    objects = evidence.get("evidence_objects", evidence.get("objects")) or []
-    reasons = sorted({r for obj in objects for r in str(obj.get("reasons") or "").split(";") if r})
-    qc_flagged = evidence.get("status") == "flagged" or any(
-        obj.get("decision") and obj["decision"] != "keep" for obj in objects
-    )
-    actual = [str(obj.get("object_id")) for obj in objects]
-    required = sorted(map(str, required_object_ids)) if required_object_ids is not None else sorted(actual)
-    missing_objects = sorted(set(required) - set(actual))
-    unexpected_objects = sorted(set(actual) - set(required))
-    duplicate_objects = len(actual) != len(set(actual))
-    scored = []
-    missing = []
-    warnings = []
-    for obj in sorted(objects, key=lambda item: str(item.get("object_id"))):
+def compute_qmask(evidence: dict, config: dict | None = None) -> dict:
+    """Score saved ``objects`` evidence without adding eligibility gates.
+
+    Missing diagnostics are ignored. Without components an unflagged object
+    receives one and a flagged object receives flag_floor. With components,
+    the floor applies only to positive scores; measured zeros stay zero.
+    """
+    config = load_mask_config() if config is None else validate_mask_config(config)
+    objects = evidence.get("objects") or []
+    reasons = []
+    flagged = str(evidence.get("status") or "") == "flagged"
+    scored, missing = [], []
+    for obj in objects:
+        decision = str(obj.get("decision") or "")
+        tokens = str(obj.get("reasons") or "")
+        if decision and decision != "keep":
+            flagged = True
+        reasons.extend(part for part in tokens.split(";") if part)
         components = {}
-        for name, spec in protocol["components"].items():
-            score = component_score(obj.get(name), spec, protocol["gamma"])
+        for name, spec in config["components"].items():
+            score = component_score(obj.get(name), spec, config["gamma"])
             if score is None:
                 missing.append({"object_id": obj.get("object_id"), "component": name})
             else:
                 components[name] = score
-        if legacy:
-            tokens = str(obj.get("reasons") or "")
-            if "insufficient_valid_middle_frames" in tokens:
-                components["valid_middle_frames"] = 0.0
-            if "low_middle_coverage" in tokens and "middle_coverage" not in components:
-                components["middle_coverage"] = 0.0
-        groups = {}
-        if protocol["aggregation"] == "group_mean":
-            for name, group in protocol["groups"].items():
-                if all(key in components for key in group["components"]):
-                    groups[name] = mean(components[key] for key in group["components"])
-            score = (sum(groups[name] * group["weight"] for name, group in protocol["groups"].items())
-                     / sum(group["weight"] for group in protocol["groups"].values())) if len(groups) == len(protocol["groups"]) else None
-        elif components:
-            score = min(components.values()) if protocol["aggregation"] == "min" else mean(components.values())
+        if "insufficient_valid_middle_frames" in tokens:
+            components["valid_middle_frames"] = 0.0
+        if "low_middle_coverage" in tokens and "middle_coverage" not in components:
+            components["middle_coverage"] = 0.0
+        if components:
+            score = min(components.values())
+            if decision not in ("", "keep") and score > 0.0:
+                score = max(score, config["flag_floor"])
         else:
-            score = (1.0 if obj.get("decision") in (None, "", "keep") else 0.0) if legacy else None
+            score = 1.0 if decision in ("", "keep") else config["flag_floor"]
         scored.append({"object_id": obj.get("object_id"), "score": score,
-                       "components": components, "groups": groups, "decision": obj.get("decision"),
-                       "minimum_component": min(components.values()) if components else None})
-    unavailable = not legacy and (not objects or missing or missing_objects or unexpected_objects or duplicate_objects)
-    if legacy and (missing or not objects):
-        warnings.append("legacy_missing_evidence_fallback")
-    if unavailable:
-        score, status = None, "score_unavailable"
-    else:
-        values = [obj["score"] for obj in scored]
-        score = (min(values) if protocol["object_aggregation"] == "min" else mean(values)) if values else (0.0 if qc_flagged else 1.0)
-        status = "fail" if score <= 0 else ("pass" if score >= 0.999 and not qc_flagged else "weak")
-    return {"score": score, "status": status, "objects": scored, "reasons": reasons,
-            "protocol_id": protocol["protocol_id"], "protocol_hash": protocol_hash(protocol),
-            "window_policy": protocol["window_policy"], "required_object_ids": required,
-            "missing_components": missing, "missing_objects": missing_objects,
-            "unexpected_objects": unexpected_objects, "duplicate_objects": duplicate_objects,
-            "warnings": warnings, "evidence_source": evidence.get("evidence_source", "embedded_result"),
-            "diagnostic_version": evidence.get("diagnostic_version", "legacy_embedded_unversioned")}
+                       "components": components, "decision": obj.get("decision")})
+    score = min(item["score"] for item in scored) if scored else (0.0 if flagged else 1.0)
+    status = "fail" if score <= 0 else ("pass" if score >= 0.999 and not flagged else "weak")
+    warnings = []
+    if missing:
+        warnings.append("missing_components_ignored")
+    if not objects:
+        warnings.append("empty_mask_evidence_fallback")
+    return {"score": score, "status": status, "objects": scored,
+            "reasons": sorted(set(reasons)) if flagged else [], "config_hash": mask_config_hash(config),
+            "missing_components": missing, "warnings": warnings,
+            "window_fractions": config["window_fractions"],
+            "evidence_source": evidence.get("evidence_source", "embedded_result")}

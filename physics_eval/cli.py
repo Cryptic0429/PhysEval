@@ -206,8 +206,6 @@ def build_score_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-root", default="batch_eval_results",
                         help="Root containing <metric>/<prompt_id>/result.json")
 
-    parser.add_argument("--scoring-protocol", default="grouped_v2_candidate", help="Built-in Qmask protocol name or JSON path")
-
     parser.add_argument("--metadata", default=str(WORKSPACE_ROOT / "benchmark/metadata/csv/phys_t2v_bench_metadata__metadata.csv"), help="Expected benchmark CSV/XLSX; use none for explicitly partial/custom scoring")
 
     parser.add_argument("--metric", default=None,
@@ -226,7 +224,7 @@ def build_score_parser() -> argparse.ArgumentParser:
                         help="Optional JSON object mapping metric names to tau values")
 
     parser.add_argument("--penalty-multiplier", type=float, default=None,
-                        help="Convenience multiplier for weak_valid; also used by legacy --mask-policy penalty")
+                        help="Convenience multiplier for weak_valid; also used by --mask-policy penalty")
 
     parser.add_argument("--weak-valid-multiplier", type=float, default=0.8,
                         help="Multiplier for physics status weak_valid. Default: 0.8 (paper protocol)")
@@ -281,7 +279,6 @@ def parse_score_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 EXTRA_COMMANDS = {
     "analyze-sensitivity": ("experiments.scoring_sensitivity", "main"),
-    "analyze-mask-protocols": ("experiments.historical.qmask_protocol_comparison", "main"),
     "validate-masks": ("validation.synthetic_masks", "main"),
     "validate-open-video": ("validation.open_video_preflight", "main"),
 }

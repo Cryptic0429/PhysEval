@@ -190,20 +190,6 @@ def resolve_tracking_json(row: dict[str, Any], metadata_path: Path, json_root: P
     raise FileNotFoundError(f"Tracking_JSON not found. searched: {searched}")
 
 
-def required_ids(result: dict) -> list[str]:
-    metadata = result.get("metadata") or {}
-    expected = int(metadata.get("Num_Objects") or metadata.get("Tracking_Objects") or 1)
-    explicit = metadata.get("Required_Object_IDs")
-    if explicit is not None:
-        if not isinstance(explicit, list) or len(explicit) != expected or len(set(map(str, explicit))) != expected:
-            raise ValueError("Required_Object_IDs must contain exactly the required unique IDs")
-        return list(map(str, explicit))
-    tracked = (result.get("tracking_quality") or {}).get("counted_object_ids")
-    if isinstance(tracked, list) and len(tracked) == expected:
-        return list(map(str, tracked))
-    return [str(i) for i in range(1, expected + 1)]
-
-
 def normalize_records(data: dict, bbox_convention: str | None = None) -> tuple[list[dict], int]:
     convention = bbox_convention or data.get("bbox_convention", "inclusive")
     if convention not in {"inclusive", "exclusive"}:

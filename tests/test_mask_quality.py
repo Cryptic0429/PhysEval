@@ -1,4 +1,4 @@
-"""CPU-only regression tests for versioned Qmask and shared input adapters."""
+"""CPU-only regression tests for mask reliability and shared input adapters."""
 from __future__ import annotations
 
 import copy
@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image
 from physics_eval.io.tracks import normalize_records, nested_frames
 from physics_eval.quality.mask_evidence import extract_quality_evidence, load_series_from_json, analyze_series, DEFAULT_DIAGNOSTICS
-from physics_eval.quality.protocol import load_protocol, protocol_hash, validate_protocol
+from physics_eval.quality.config import load_mask_config, mask_config_hash, validate_mask_config
 from physics_eval.quality.mask_score import compute_qmask, component_score
 from physics_eval.quality.tracking_checks import analyze_tracking_quality_data
 from physics_eval import scoring as scorer
@@ -26,55 +26,69 @@ from types import SimpleNamespace
 
 class QmaskTests(unittest.TestCase):
     def setUp(self):
-        self.protocol = load_protocol("grouped_v2_candidate")
-        self.obj = {name: spec["good_value"] for name, spec in self.protocol["components"].items()}
+        self.config = load_mask_config()
+        self.obj = {name: spec["good_value"] for name, spec in self.config["components"].items()}
         self.obj.update(object_id=1, decision="keep", reasons="")
 
-    def test_grouped_protocol_is_default(self):
-        self.assertEqual(load_protocol()["protocol_id"], "grouped_v2_candidate")
-        with patch.object(sys, "argv", ["score"]):
-            args = parse_score_args()
-        self.assertEqual(args.qmask_protocol["protocol_id"], "grouped_v2_candidate")
+    def test_single_scoring_rule_is_default(self):
+        self.assertEqual(self.config["gamma"], .35)
+        self.assertEqual(self.config["flag_floor"], .85)
+        self.assertEqual(len(self.config["components"]), 10)
+        args = parse_score_args([])
+        self.assertEqual(args.mask_config, self.config)
+        self.assertNotIn("protocol_id", args.mask_config)
 
     def test_mapping_boundaries_and_monotonicity(self):
-        for spec in self.protocol["components"].values():
-            vals = [component_score(spec["good_value"] + r*(spec["bad_value"]-spec["good_value"]), spec, 1) for r in (0, .25, .5, 1)]
-            for value, expected in zip(vals, [1, .75, .5, 0]):
-                self.assertAlmostEqual(value, expected)
+        for spec in self.config["components"].values():
+            vals = [component_score(spec["good_value"] + r*(spec["bad_value"]-spec["good_value"]), spec, .35) for r in (0, .25, .5, 1)]
+            for value, r in zip(vals, (0, .25, .5, 1)):
+                self.assertAlmostEqual(value, 1-r**.35)
 
-    def test_group_weights(self):
-        self.obj["area_cv"] = 0.7
-        result = compute_qmask({"objects": [self.obj]}, self.protocol, [1])
-        self.assertAlmostEqual(result["score"], 20/21)
+    def test_minimum_component_and_centroid_penalties(self):
+        for name in ("area_cv", "max_centroid_step_norm_by_diameter"):
+            obj = dict(self.obj, **{name: self.config["components"][name]["bad_value"]})
+            self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
 
-    def test_missing_evidence_never_full_credit(self):
+    def test_missing_components_and_empty_evidence_fallback(self):
         for evidence in ({}, {"objects": []}, {"objects": [{"object_id": 1, "decision": "keep"}]}):
-            self.assertEqual(compute_qmask(evidence, self.protocol, [1])["status"], "score_unavailable")
+            self.assertEqual(compute_qmask(evidence, self.config)["score"], 1)
+        flagged = {"objects": [{"object_id": 1, "decision": "review"}]}
+        self.assertEqual(compute_qmask(flagged, self.config)["score"], .85)
+        self.assertEqual(compute_qmask({"status": "flagged"}, self.config)["score"], 0)
 
-    def test_nonfinite_and_missing_object(self):
+    def test_nonfinite_components_are_ignored(self):
         bad = dict(self.obj, area_cv=float("nan"))
-        self.assertIsNone(compute_qmask({"objects": [bad]}, self.protocol, [1])["score"])
-        self.assertIsNone(compute_qmask({"objects": [self.obj]}, self.protocol, [1, 2])["score"])
-        self.assertIsNone(compute_qmask({"objects": [self.obj, self.obj]}, self.protocol, [1])["score"])
+        self.assertEqual(compute_qmask({"objects": [bad]}, self.config)["score"], 1)
 
-    def test_order_invariance(self):
+    def test_minimum_object_score_and_order_invariance(self):
         other = dict(self.obj, object_id=2, area_cv=.7)
-        a = compute_qmask({"objects": [self.obj, other]}, self.protocol, [1, 2])
-        b = compute_qmask({"objects": [other, self.obj]}, self.protocol, [2, 1])
-        self.assertEqual(a, b)
+        a = compute_qmask({"objects": [self.obj, other]}, self.config)
+        b = compute_qmask({"objects": [other, self.obj]}, self.config)
+        self.assertEqual(a["score"], 0)
+        self.assertEqual(a["score"], b["score"])
 
-    def test_legacy_missing_fallback_is_explicit(self):
-        result = compute_qmask({}, load_protocol("legacy_v1"), [1])
+    def test_flag_floor_only_applies_to_positive_object_scores(self):
+        obj = dict(self.obj, decision="review", area_cv=.475)
+        self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], .85)
+        obj["area_cv"] = .7
+        self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
+
+    def test_missing_coverage_reason_preserves_zero(self):
+        obj = {"object_id": 1, "decision": "review", "reasons": "low_middle_coverage"}
+        self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
+
+    def test_missing_evidence_warning(self):
+        result = compute_qmask({}, self.config)
         self.assertEqual(result["score"], 1)
-        self.assertIn("legacy_missing_evidence_fallback", result["warnings"])
+        self.assertIn("empty_mask_evidence_fallback", result["warnings"])
 
     def test_config_validation_and_hash(self):
-        config = copy.deepcopy(self.protocol)
+        config = copy.deepcopy(self.config)
         config["gamma"] = 2
-        self.assertNotEqual(protocol_hash(config), protocol_hash(self.protocol))
+        self.assertNotEqual(mask_config_hash(config), mask_config_hash(self.config))
         config["gamma"] = float("nan")
         with self.assertRaises(ValueError):
-            validate_protocol(config)
+            validate_mask_config(config)
 
     @staticmethod
     def tracks(objects=1):
@@ -105,7 +119,7 @@ class QmaskTests(unittest.TestCase):
     def test_two_object_mask_evidence_scores(self):
         records, masks = self.tracks(2)
         evidence = extract_quality_evidence(records, masks, total_frames=20, bbox_convention="exclusive")
-        core = compute_qmask(evidence, self.protocol, [1, 2])
+        core = compute_qmask(evidence, self.config)
         self.assertEqual(core["score"], 1)
         self.assertEqual(len(core["objects"]), 2)
 
@@ -123,12 +137,11 @@ class QmaskTests(unittest.TestCase):
             series = load_series_from_json(track, None, "{frame_idx:05d}.png", None, False)
             disk, _ = analyze_series(series[0], SimpleNamespace(**DEFAULT_DIAGNOSTICS))
             memory = extract_quality_evidence(records, masks, total_frames=n, bbox_convention="exclusive")["objects"][0]
-            for key in self.protocol["components"]:
+            for key in self.config["components"]:
                 self.assertAlmostEqual(disk[key], memory[key], msg=key)
 
-    def test_scorer_gates_zero_and_unavailable(self):
-        with patch.object(sys, "argv", ["score", "--scoring-protocol", "grouped_v2_candidate"]):
-            args = parse_score_args()
+    def test_scorer_gates_zero_and_missing_evidence(self):
+        args = parse_score_args([])
         data = {"metric": "velocity", "metadata": {"Num_Objects": 1},
                 "tracking_quality": {"status": "pass", "counted_object_ids": [1]},
                 "physics_result": {"Status": "valid", "Relative_Error": 0, "Measured_Value": 1},
@@ -139,9 +152,9 @@ class QmaskTests(unittest.TestCase):
             data["mask_qc"] = {}
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertTrue(a["effective_for_score"])
-            self.assertIsNone(a["adjusted_score"])
-            self.assertFalse(a["score_available"])
-            data["mask_qc"] = {"objects": [{**{k:s["bad_value"] for k,s in self.protocol["components"].items()}, "object_id":1}]}
+            self.assertEqual(a["adjusted_score"],100)
+            self.assertTrue(a["score_available"])
+            data["mask_qc"] = {"objects": [{**{k:s["bad_value"] for k,s in self.config["components"].items()}, "object_id":1}]}
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertTrue(a["effective_for_score"])
             self.assertEqual(a["adjusted_score"],0)

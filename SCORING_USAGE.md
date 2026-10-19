@@ -26,7 +26,7 @@ Useful options:
 | `--tau 0.35` or `--tolerance-json tolerances.json` | Override physical-error tolerances for a sensitivity analysis. |
 | `--weak-valid-multiplier 0.6` | Change the weak-validity weight for a sensitivity analysis. |
 
-The PhysEval scoring protocol defined in the paper uses continuous mask quality and treats failed tracking checks as hard exclusions. Threshold and policy options are listed by `python physeval.py score --help`; use supported overrides only for explicitly reported sensitivity analyses. The default grouped protocol requires continuous mask weighting and hard-fail tracking. Alternative mask/tracking policies must be selected explicitly and change the paper's scoring settings.
+PhysEval uses one mask-quality scoring rule, configured in `configs/scoring/mask_quality.json`. The defaults are continuous mask weighting and hard-fail tracking. Threshold and policy overrides are listed by `python physeval.py score --help`; changing them is a sensitivity analysis and must be reported explicitly.
 
 ## Which videos receive a score?
 
@@ -36,9 +36,13 @@ The scorer applies checks in order:
 2. **Physics validity:** the evaluator must return `valid` or `weak_valid`. `invalid` and `failed` videos are excluded.
 3. **Mask quality:** after both hard checks pass, mask evidence supplies a continuous multiplier in `[0, 1]`. A low measured value reduces the score but does not itself exclude the video.
 
-The paper defines the mask-quality score, **Q_mask**, by averaging component scores within three groups—shape and scale, segmentation consistency, and local completeness—then weighting the groups equally and averaging across required objects. Q_mask supplies the `mask_quality_score` term in the formula below. Centroid jumps are recorded for diagnosis but do not enter this multiplier. The mask score is a heuristic for two-dimensional track reliability, not a probability that tracking is correct.
+The mask-quality score, **Q_mask**, uses ten diagnostics: area P95/P05 ratio, area CV, box width CV, box height CV, box aspect CV, maximum log-area jump, trend scale ratio, maximum centroid step divided by diameter, translation-aligned IoU, and middle-window coverage. Each diagnostic maps normalized degradation `p` to `1-p^0.35`. Take the minimum available component score within each object, then the minimum object score across objects. Q_mask is a heuristic reliability multiplier, not a probability that tracking is correct.
 
-Missing evidence for a required mask component or object makes the score unavailable rather than substituting a perfect score. A measured mask score of zero remains a valid measurement and does not change whether the video passed the two hard checks.
+For an object whose decision is neither empty nor `keep`, a positive score is raised to at least **0.85**. An exact zero stays zero. The reasons `insufficient_valid_middle_frames` and, when its numerical component is missing, `low_middle_coverage` contribute a zero component before this floor is applied.
+
+Missing/nonfinite component values are ignored. If an object has no usable components, its score is `1` for an empty/`keep` decision and `0.85` for a flagged decision. If there are no object records, Q_mask is `1` unless the mask-QC status is `flagged`, in which case it is `0`. Only saved `mask_qc.objects` are used; no extra object-ID gate is introduced at scoring. The object-count tracking gate still applies. Reports record configuration hashes, missing components and fallback warnings in per-video Q_mask details.
+
+A Q_mask of zero reduces contribution to zero without changing eligibility. A missing diagnostic does not establish that the track is reliable; these fallbacks reproduce the defined scoring behavior.
 
 ## Score formula
 
@@ -73,20 +77,20 @@ Each metric's score is averaged over its videos; the overall model score then av
 By default, reports are written to:
 
 ```text
-<result-root>/score_reports/<protocol_id>/all_metrics/
+<result-root>/score_reports/all_metrics/
 ```
 
 With `--metric`, the final directory is the metric name instead of `all_metrics`. The main files are:
 
 | File | Contents |
 | --- | --- |
-| `score_summary.json` | Model summary, scoring settings, protocol fingerprint, metric summaries and per-video records. |
+| `score_summary.json` | Model summary, scoring settings, mask-configuration fingerprint, metric summaries and per-video records. |
 | `metric_scores.csv` | One summary row per metric. |
 | `per_video_scores.csv` | Per-video status, scores, quality factors and failure reasons. |
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons. |
 | `plots/` | Score and discard charts, unless `--no-plots` is used. |
 
-The scorer checks result IDs against benchmark metadata by default. If required scoring evidence is missing, or result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
+The scorer checks result IDs against benchmark metadata by default. If result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. Missing mask diagnostics follow the fallback rules above. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
 
 ## Saved-evidence research analyses
 
@@ -97,13 +101,8 @@ The formal scorer is implemented in `physics_eval/scoring.py`; experiment module
 python physeval.py analyze-sensitivity \
   --results-root ../results \
   --output-dir runs/scoring_sensitivity
-
-# Q_mask protocol comparisons.
-python physeval.py analyze-mask-protocols \
-  --results-root ../results \
-  --output-dir runs/mask_protocol_comparison
 ```
 
-Sensitivity analysis reuses saved trajectories and physical measurements while varying Q_mask gamma, weak-valid weights, or the four applicable R² consumers, and retains the spring period-confidence rule; it expects the saved six-model cohort. Protocol comparisons preserve protocol identity/hash and support the optional `--baseline-scorer path/to/reference_score.py` regression check against a reference scorer. Candidate parameter changes are exploratory and have not been calibrated against manual labels or ground truth.
+Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, retaining minimum aggregation and the flagged-score floor. Spring retains its own period-confidence rule. Outputs and ranks are computed anew from the supplied evidence; previously published values from other scoring rules must be recomputed.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

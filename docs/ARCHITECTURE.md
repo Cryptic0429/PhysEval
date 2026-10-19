@@ -14,7 +14,6 @@ flowchart TD
     R --> S["score: gates, Q_mask, physical scores"]
     S --> O["Metric and model reports"]
     R --> SA["analyze-sensitivity"]
-    R --> HA["analyze-mask-protocols: protocol comparison"]
     V["Synthetic and real-video validation"] -.exercise shared implementations.-> T
     V -.exercise.-> S
     U["Unit and integration tests"] -.verify.-> E
@@ -34,10 +33,10 @@ Video generation remains external. Validation, analysis and tests are separate w
 | Tracking | physics_eval/tracking/sam2.py, video.py, output.py | Shared inference, frame extraction and per-frame track/mask records |
 | Internal execution | physics_eval/tracking/worker.py | Isolated inference subprocess boundary; explicit prompt manifest rather than callback replacement |
 | Estimation | physics_eval/estimation.py, calibration.py, evaluators/, math/ | Ten registered physical tasks, scale recovery, fits, geometry and time alignment |
-| Reliability | physics_eval/quality/ | Tracking gate, estimation checks, mask evidence, versioned Q_mask and saved-mask inspection |
+| Reliability | physics_eval/quality/ | Tracking gate, estimation checks, mask evidence, mask-quality configuration and minimum aggregation and saved-mask inspection |
 | Scoring | physics_eval/scoring.py | Eligibility, physical error scoring, quality weighting, completeness and aggregate statistics |
 | Presentation | physics_eval/reporting.py | Diagnostic/trajectory plots, score plots and report writers |
-| Research | experiments/ | Sensitivity and protocol-comparison analyses |
+| Research | experiments/ | Saved-evidence parameter sensitivity |
 | Validation | validation/ | Curated open-video package preflight and controlled synthetic-mask experiments |
 | Maintenance | tools/ | Asset preparation, environment/GPU inspection |
 | Regression | tests/ | Unit, analytical-control, mocked inference and integration checks |
@@ -69,7 +68,7 @@ Runtime paths:
 | Formal frame cache | data/custom/<scene>/frames/ |
 | Formal masks and intermediate tracks | sam2_tracks/<scene>/ |
 | Organized formal results | batch_eval_results/<model>/<metric>/<prompt_id>/ |
-| Score reports | <result-root>/score_reports/<protocol>/<metric-or-all_metrics>/ |
+| Score reports | <result-root>/score_reports/<metric-or-all_metrics>/ |
 
 Formal masks are referenced from sam2_tracks to avoid duplicating every PNG.
 
@@ -79,7 +78,7 @@ Formal masks are referenced from sam2_tracks to avoid duplicating every PNG.
 - The public CLI calls functions directly; it does not run scripts via runpy.
 - The formal pipeline launches the internal tracking worker with an explicit PYTHONPATH, so a separate workspace root remains supported.
 - Research calls scorer.score_data and stable configuration APIs; it does not replace scorer.load_json.
-- Optional scorer regression against a reference implementation runs in an isolated subprocess.
+- Regression tests compare against a frozen, independent reference scorer, including CLI reports.
 - SAM2/PyTorch imports are lazy. CPU estimation, scoring, mask controls and tests do not require loading a GPU model.
 - Tests and experiments depend on the core. Core modules do not import experiment runners, maintenance scripts or tests.
 - The internal worker parses --help before loading any third-party package.
