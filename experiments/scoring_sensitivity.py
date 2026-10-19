@@ -1,4 +1,4 @@
-"""One-factor sensitivity on saved evidence, with grouped Qmask fixed.
+"""One-factor sensitivity on saved evidence, with minimum aggregation fixed.
 
 Never modifies input results or changes the production default. Every scenario
 uses the production scorer; physical R2 cutoffs apply only to its four consumers.
@@ -14,7 +14,7 @@ from pathlib import Path
 import statistics
 
 ROOT = Path(__file__).resolve().parents[1]
-from physics_eval.quality.protocol import load_protocol, protocol_hash
+from physics_eval.quality.config import load_mask_config, mask_config_hash
 from physics_eval import scoring as scorer
 from physics_eval.cli import parse_score_args
 from physics_eval.io.reports import write_csv, write_json
@@ -31,7 +31,7 @@ def sha(path):
 
 
 def scenarios():
-    base = dict(gamma=1.0, weak_weight=0.8, weak_cutoff=0.65, valid_cutoff=0.85)
+    base = dict(gamma=0.35, weak_weight=0.8, weak_cutoff=0.65, valid_cutoff=0.85)
     runs = [dict(scenario="baseline", family="baseline", **base)]
     for gamma in GAMMAS:
         runs.append(dict(scenario=f"gamma_{gamma:g}", family="gamma", **{**base, "gamma": gamma}))
@@ -84,14 +84,14 @@ def run(args: argparse.Namespace) -> int:
     if out.exists() and any(out.iterdir()):
         raise SystemExit("Use a fresh output directory; existing analyses are immutable")
     out.mkdir(parents=True, exist_ok=True)
-    protocol = load_protocol("grouped_v2_candidate")
-    design = dict(qmask=protocol, qmask_hash=protocol_hash(protocol), spring_confidence_threshold=0.20,
+    config = load_mask_config()
+    design = dict(mask_quality_config=config, mask_quality_config_hash=mask_config_hash(config), spring_confidence_threshold=0.20,
                   r2_metrics=sorted(AFFECTED), scenarios=scenarios(),
                   aggregation="metric macro average via production scorer; empty effective cells excluded from effective macro",
                   design="one factor at a time; all other parameters fixed; no GPU retracking",
                   weak_zero_policy="zero contribution, eligibility preserved; not a strict exclusion experiment")
     write_json(out / "design.json", design)
-    defaults = parse_score_args(["--no-plots", "--scoring-protocol", "grouped_v2_candidate"])
+    defaults = parse_score_args(["--no-plots"])
     paths_by_model, data, manifest = {}, {}, []
     spring_n = 0
     for model_dir in sorted(args.results_root.iterdir()):
@@ -121,7 +121,7 @@ def run(args: argparse.Namespace) -> int:
     assert len(affected_paths) == 1200
     assert all(status_at(data[p], .65, .85) == data[p]["physics_result"]["Status"] for p in affected_paths)
     for source in (Path(__file__), ROOT / "physics_eval/scoring.py", ROOT / "physics_eval/quality/mask_score.py",
-                   ROOT / "physics_eval/quality/estimation_checks.py", ROOT / "configs/scoring/grouped_v2_candidate.json",
+                   ROOT / "physics_eval/quality/estimation_checks.py", ROOT / "configs/scoring/mask_quality.json",
                    Path(defaults.metadata)):
         manifest.append(dict(path=str(source.resolve()), sha256=sha(source), role="code_config_or_metadata"))
     write_json(out / "input_manifest.json", manifest)
@@ -133,8 +133,8 @@ def run(args: argparse.Namespace) -> int:
     for scenario in design["scenarios"]:
         run = copy.copy(defaults)
         run.weak_valid_multiplier = scenario["weak_weight"]
-        run.qmask_protocol = copy.deepcopy(protocol)
-        run.qmask_protocol["gamma"] = scenario["gamma"]
+        run.mask_config = copy.deepcopy(config)
+        run.mask_config["gamma"] = scenario["gamma"]
         current = dict(data)
         for path in affected_paths:
             value = data[path]
@@ -178,10 +178,10 @@ def run(args: argparse.Namespace) -> int:
                 assert abs(row["adjusted_score"] - expected) < 1e-10
             if scenario["family"] == "gamma" and before["effective_for_score"]:
                 delta = row["adjusted_score"] - before["adjusted_score"]
-                assert delta >= -1e-10 if scenario["gamma"] >= 1 else delta <= 1e-10
+                assert delta >= -1e-10 if scenario["gamma"] >= config["gamma"] else delta <= 1e-10
             if scenario["family"] == "r2" and row["metric"] not in AFFECTED:
                 assert row["adjusted_score"] == before["adjusted_score"]
-            if (scenario["gamma"], scenario["weak_weight"], scenario["weak_cutoff"], scenario["valid_cutoff"]) == (1,.8,.65,.85):
+            if (scenario["gamma"], scenario["weak_weight"], scenario["weak_cutoff"], scenario["valid_cutoff"]) == (config["gamma"],.8,.65,.85):
                 assert row["adjusted_score"] == before["adjusted_score"] and row["status"] == before["status"]
             per_video.append(dict(**scenario, model=row["model"], metric=row["metric"], prompt_id=row["prompt_id"],
                 original_status=data[path]["physics_result"]["Status"], status=row["status"],
@@ -276,7 +276,7 @@ def make_report(out, summaries, metrics, global_rows, coefficients, crossings, c
     base_global = next(r for r in global_rows if r["family"] == "baseline")
     model_order = [r["model"] for r in baseline]
     lines = ["# 评分参数敏感性", "",
-        "基准：九项掩膜指标按三组等权聚合，γ=1；weak_valid权重=0.8，四项共享R²阈值为0.65/0.85。弹簧使用峰值或自相关周期估计，周期置信度达到0.20为valid，否则可测样本为weak_valid。",
+        "基准：十项掩膜诊断在对象内及对象间取最小值，γ=0.35，被标记对象的非零质量分下限为0.85；weak_valid权重=0.8，四项共享R²阈值为0.65/0.85。弹簧使用峰值或自相关周期估计，周期置信度达到0.20为valid，否则可测样本为weak_valid。",
         "直接读取六模型各500条保存结果，保持物理测量与跟踪固定，每次仅改变一个评分因素。弹簧的周期置信度不套用共享R²阈值。",
         "分数单位为0–100。E2E将未通过门控的样本记0，按十指标平均；条件宏平均只使用各指标的有效样本，排除无有效样本的指标。", "",
         "| 模型 | 有效数 | 弱有效数 | 条件宏平均 | E2E宏平均 |",
@@ -334,7 +334,7 @@ def make_plot(out, summaries, global_rows):
             axes[2].plot([r["weak_cutoff"] for r in rows], [r[score_field] for r in rows], "o-", color=color, linewidth=1.6, markersize=4)
         for ax, title, xlabel, baseline_value in zip(axes,
             ("Qmask gamma", "Weak-valid weight", "R2 weak cutoff (valid = 0.85)"),
-            ("Gamma", "Weight", "Weak cutoff"), (1.0,.8,.65)):
+            ("Gamma", "Weight", "Weak cutoff"), (.35,.8,.65)):
             ax.set_title(title)
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
@@ -345,7 +345,7 @@ def make_plot(out, summaries, global_rows):
         axes[2].set_xticks(WEAK_CUTOFFS)
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, loc="lower center", ncol=6, frameon=False, fontsize=9)
-        fig.suptitle("One factor at a time: grouped Qmask; 3,000 videos", fontsize=13)
+        fig.suptitle("One factor at a time: minimum mask reliability; 3,000 videos", fontsize=13)
         fig.tight_layout(rect=(0,.09,1,.94))
         for suffix in ("png", "pdf", "svg"):
             fig.savefig(out / f"sensitivity_{kind}.{suffix}", dpi=220)

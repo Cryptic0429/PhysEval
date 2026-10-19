@@ -136,7 +136,7 @@ Inspect `batch_eval_results/my_model/<metric>/<prompt_id>/result.json` first. Ea
 
 ### 3. Score the results
 
-After the full evaluation, aggregate results using the PhysEval scoring protocol defined in the paper:
+After the full evaluation, aggregate results using the PhysEval scoring rules:
 
 ```bash
 python physeval.py score \
@@ -163,7 +163,7 @@ adjusted_score = physical_accuracy_score
 
 `tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-The paper defines the **mask-quality score, Q_mask**, using three groups: **shape and scale**, **segmentation consistency**, and **local completeness**. Component scores are averaged within each group, the three groups receive equal weight, and the resulting object scores are averaged across required objects. Q_mask supplies the `mask_quality_score` term above. A low measured Q_mask reduces the adjusted score without excluding the video; missing required evidence makes scoring unavailable.
+The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. A flagged object with a positive score has a minimum weight of `0.85`; an exact zero remains zero. Missing components are ignored; an object with no components receives `1` when unflagged or `0.85` when flagged. With no objects, unflagged evidence receives `1` and flagged evidence receives `0`. These fallbacks do not establish that tracking is correct. Q_mask supplies the multiplier above without changing effective eligibility.
 
 | Reported quantity | Interpretation |
 | --- | --- |
@@ -171,13 +171,13 @@ The paper defines the **mask-quality score, Q_mask**, using three groups: **shap
 | **Discard rate** | Fraction of videos that fail tracking quality, physics validity, or both. |
 | **End-to-end score** | Supplementary mean over all videos, assigning zero to discarded videos. |
 
-Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs or required scoring evidence are incomplete.
+Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs are incomplete or an eligible physical estimate cannot be scored. Missing mask diagnostics follow the fallbacks above.
 
-Reports are saved under `batch_eval_results/my_model/score_reports/<protocol_id>/all_metrics/`:
+Reports are saved under `batch_eval_results/my_model/score_reports/all_metrics/`:
 
 | Output | Contents |
 | --- | --- |
-| `score_summary.json` | Model and metric summaries, scoring settings, and protocol fingerprint |
+| `score_summary.json` | Model and metric summaries, scoring settings, and a mask-configuration fingerprint |
 | `metric_scores.csv` | Per-metric scores and measurability statistics |
 | `per_video_scores.csv` | Per-video measurements, quality factors, statuses, and scores |
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons |
@@ -220,7 +220,7 @@ PhysEval/
 ├── tests/                        # Unit, synthetic and integration checks
 ├── assets/                       # Paper figures used by the README
 ├── benchmark/metadata/           # Released workbooks and CSVs
-├── configs/scoring/              # Q_mask scoring protocol configurations
+├── configs/scoring/              # Mask-quality scoring configuration
 ├── requirements*.txt             # Core and test dependencies
 ├── LICENSE                       # MIT license
 └── docs/ARCHITECTURE.md           # Module responsibilities and workflow
@@ -250,7 +250,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-mask-protocols` compares Q_mask protocol configurations on saved results.
+`analyze-sensitivity` varies scoring parameters on saved results while retaining minimum aggregation and the flagged-score floor.
 
 ## 🔍 Scope and Assumptions
 

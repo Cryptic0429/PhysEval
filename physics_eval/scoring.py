@@ -10,9 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .quality.tracking_checks import analyze_tracking_quality_file
-from .quality.protocol import load_protocol, protocol_hash
+from .quality.config import load_mask_config, mask_config_hash
 from .quality.mask_score import compute_qmask
-from .io.tracks import required_ids
 from .reporting import plot_reports, write_score_csv as write_csv, write_reason_csv
 
 DEFAULT_TOLERANCES = {
@@ -58,9 +57,7 @@ def prepare_args(args: argparse.Namespace) -> argparse.Namespace:
         value = getattr(args, name)
         if value is not None and not (0.0 <= value <= 1.0):
             raise ValueError(f"--{name.replace('_', '-')} must be between 0 and 1")
-    args.qmask_protocol = load_protocol(args.scoring_protocol)
-    if args.qmask_protocol["missing_policy"] != "legacy" and (args.mask_policy != "continuous" or args.strict_qc or args.tracking_policy != "hard_fail"):
-        raise ValueError("Candidate protocols require continuous masks and hard-fail tracking; no legacy policy overrides")
+    args.mask_config = load_mask_config()
     return args
 
 
@@ -187,8 +184,8 @@ def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, 
             "objects": [],
         }
 
-    protocol = getattr(args, "qmask_protocol", None) or load_protocol("grouped_v2_candidate")
-    return compute_qmask(result.get("mask_qc") or {}, protocol, required_ids(result))
+    config = getattr(args, "mask_config", None) or load_mask_config()
+    return compute_qmask(result.get("mask_qc") or {}, config)
 
 
 def tracking_path_from_result(result: dict[str, Any], result_path: Path) -> Path | None:
@@ -598,8 +595,7 @@ def score_data(
         adjusted = None
     return {
         "score_available": score_available,
-        "qmask_protocol_id": mask_info.get("protocol_id"),
-        "qmask_protocol_hash": mask_info.get("protocol_hash"),
+        "mask_quality_config_hash": mask_info.get("config_hash"),
         "qmask_details": mask_info,
         "model": args.model_name or Path(args.result_root).expanduser().resolve().name,
         "metric": metric,
@@ -653,7 +649,7 @@ def run(args: argparse.Namespace) -> None:
     out_dir = (
         Path(args.output_dir).expanduser().resolve()
         if args.output_dir
-        else result_root / "score_reports" / args.qmask_protocol["protocol_id"] / (args.metric if args.metric else "all_metrics")
+        else result_root / "score_reports" / (args.metric if args.metric else "all_metrics")
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -680,8 +676,8 @@ def run(args: argparse.Namespace) -> None:
         "model_name": args.model_name or result_root.name,
         "result_root": str(result_root),
         "scoring": {
-            "qmask_protocol": args.qmask_protocol,
-            "qmask_protocol_hash": protocol_hash(args.qmask_protocol),
+            "mask_quality_config": args.mask_config,
+            "mask_quality_config_hash": mask_config_hash(args.mask_config),
             "valid_video_rule": (
                 "The scorer applies gates in order: tracking quality first, then physics status. "
                 "If tracking fails under the selected policy, the video is excluded and later scoring steps are skipped. "
@@ -702,8 +698,11 @@ def run(args: argparse.Namespace) -> None:
             "weak_valid_multiplier": args.weak_valid_multiplier,
             "mask_policy": effective_mask_policy,
             "qc_flag_multiplier": 0.0 if effective_mask_policy == "hard_fail" else args.qc_flag_multiplier,
-            "mask_score_thresholds": args.qmask_protocol["components"],
-            "mask_score_gamma": args.qmask_protocol["gamma"],
+            "mask_score_thresholds": args.mask_config["components"],
+            "mask_score_gamma": args.mask_config["gamma"],
+            "mask_flag_floor": args.mask_config["flag_floor"],
+            "mask_aggregation": "minimum components, then minimum objects; positive flagged-object scores have a floor",
+            "mask_missing_evidence": "ignore missing components; empty unflagged evidence receives one",
             "tracking_policy": args.tracking_policy,
             "quality_flag_multiplier": 0.0 if args.tracking_policy == "hard_fail" else args.quality_flag_multiplier,
             "min_motion_extent_ratio": args.min_motion_extent_ratio,

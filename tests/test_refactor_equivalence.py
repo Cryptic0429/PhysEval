@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from physics_eval import scoring
 from physics_eval.evaluators import EVALUATOR_REGISTRY
-from physics_eval.quality.protocol import load_protocol, protocol_hash
+from physics_eval.quality.config import load_mask_config, mask_config_hash
 
 
 def _track(position):
@@ -83,12 +83,8 @@ def test_estimator_baseline_measurements(name, expected, status):
     assert evaluator(track.iloc[:1], row)["Status"] == "failed"
 
 
-@pytest.mark.parametrize("name, expected", [
-    ("grouped_v2_candidate", "192160a3811e16c861a44ba59e926e25384ecbc72a26f749e50cf92050c7de53"),
-    ("legacy_v1", "b9506aa47b1adb50ba4113bd8f18e06bbcd28b31b4b77abc354b87001c8b6d2f"),
-])
-def test_scoring_protocol_fingerprints_unchanged(name, expected):
-    assert protocol_hash(load_protocol(name)) == expected
+def test_scoring_rule_fingerprint():
+    assert mask_config_hash(load_mask_config()) == "923539fb1199d6d1d177cf31a469693540b39f53a22e2e4e462bb35c03cf0a17"
 
 
 def _score_config():
@@ -99,15 +95,15 @@ def _score_config():
         min_motion_extent_ratio=.75, min_object_coverage=.5,
         recompute_tracking_quality=False, allow_contract_errors=False,
         no_plots=True, tau=None, tolerance_json=None,
-        scoring_protocol="grouped_v2_candidate", model_name="fixture",
+        model_name="fixture",
         result_root="/fixture", metadata="none", metric=None, output_dir=None,
-        qmask_protocol=load_protocol(),
+        mask_config=load_mask_config(),
     )
 
 
 def _score_evidence():
-    protocol = load_protocol()
-    obj = {key: spec["good_value"] for key, spec in protocol["components"].items()}
+    config = load_mask_config()
+    obj = {key: spec["good_value"] for key, spec in config["components"].items()}
     obj.update(object_id=1, decision="keep", reasons="")
     return {
         "metric": "velocity", "prompt_id": "V001", "metadata": {"Num_Objects": 1},
@@ -118,7 +114,7 @@ def _score_evidence():
     }
 
 
-def test_in_memory_scoring_preserves_gate_and_missing_evidence_behavior(tmp_path):
+def test_in_memory_scoring_matches_reference_gates_and_missing_evidence_behavior(tmp_path):
     args = _score_config()
     data = _score_evidence()
     path = tmp_path / "result.json"
@@ -136,8 +132,8 @@ def test_in_memory_scoring_preserves_gate_and_missing_evidence_behavior(tmp_path
     missing["mask_qc"] = {}
     unavailable = score(missing)
     assert unavailable["effective_for_score"]
-    assert unavailable["adjusted_score"] is None
-    assert not unavailable["score_available"]
+    assert unavailable["adjusted_score"] == pytest.approx(original["adjusted_score"])
+    assert unavailable["score_available"]
 
     for section, status, reason in [
         ("tracking_quality", "flagged", "tracking_quality_failed"),
