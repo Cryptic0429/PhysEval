@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -23,11 +24,27 @@ ROOT = Path(__file__).resolve().parents[1]
 REFERENCE = ROOT / "tests/fixtures/reference_score.py"
 
 
+def remove_positive_floor(reference):
+    """Adapt only the intentional rule change in an isolated historical module.
+
+    The frozen scorer still supplies its independent component calculations,
+    fallbacks, gates and aggregation. Its source and provenance hash stay intact.
+    """
+    original = reference.object_mask_quality_score
+
+    def object_score(item):
+        historical_score, components = original(item)
+        return (min(components.values()) if components else historical_score), components
+
+    reference.object_mask_quality_score = object_score
+    return reference
+
+
 def reference_scorer():
     spec = importlib.util.spec_from_file_location("reference_score", REFERENCE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module
+    return remove_positive_floor(module)
 
 
 def assert_reference_fields(actual, expected):
@@ -87,7 +104,7 @@ def _write_results(root: Path, count=256) -> list[Path]:
 
 @pytest.mark.parametrize("mask_policy", ["continuous", "penalty", "hard_fail", "ignore"])
 @pytest.mark.parametrize("tracking_policy", ["hard_fail", "penalty", "ignore"])
-def test_scores_and_aggregates_match_independent_reference(tmp_path, mask_policy, tracking_policy):
+def test_scores_and_aggregates_match_reference_without_positive_floor(tmp_path, mask_policy, tracking_policy):
     paths = _write_results(tmp_path)
     args = parse_score_args([
         "--metadata", "none", "--result-root", str(tmp_path), "--no-plots",
@@ -113,9 +130,19 @@ def test_scores_and_aggregates_match_independent_reference(tmp_path, mask_policy
 def test_cli_reports_match_reference_and_have_no_version_directory(tmp_path):
     result_root = tmp_path / "results"
     _write_results(result_root, 24)
+    reference_cli = tmp_path / "reference_without_floor.py"
+    reference_cli.write_text(
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('reference_score', {str(REFERENCE)!r})\n"
+        "reference = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(reference)\n\n"
+        + inspect.getsource(remove_positive_floor)
+        + "\nremove_positive_floor(reference).main()\n",
+        encoding="utf-8",
+    )
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
     for executable, extra in (
-        ([str(REFERENCE)], ["--output-dir", str(tmp_path / "reference")]),
+        ([str(reference_cli)], ["--output-dir", str(tmp_path / "reference")]),
         ([str(ROOT / "physeval.py"), "score"], ["--metadata", "none"]),
     ):
         subprocess.run([sys.executable, *executable, "--result-root", str(result_root),
@@ -126,15 +153,18 @@ def test_cli_reports_match_reference_and_have_no_version_directory(tmp_path):
     expected = json.loads((tmp_path / "reference/score_summary.json").read_text())
     assert_reference_fields(current["summary"], expected["summary"])
     settings = current["scoring"]
-    assert settings["mask_score_gamma"] == .35 and settings["mask_flag_floor"] == .85
+    assert settings["mask_score_gamma"] == .35
+    assert "mask_flag_floor" not in settings
+    assert settings["mask_flagged_missing_score"] == .85
     assert "mask_quality_config_hash" in settings
     assert not any("protocol" in key for key in settings)
 
 
-def test_sensitivity_uses_production_baseline_and_keeps_floor():
+def test_sensitivity_uses_production_baseline_without_positive_floor():
     values = scenarios()
     assert len(values) == 25
     assert values[0]["gamma"] == load_mask_config()["gamma"] == .35
+    assert "flag_floor" not in load_mask_config()
     assert all(s["gamma"] == .35 for s in values if s["family"] != "gamma")
 
 

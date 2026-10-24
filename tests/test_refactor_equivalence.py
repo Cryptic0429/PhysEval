@@ -84,7 +84,7 @@ def test_estimator_baseline_measurements(name, expected, status):
 
 
 def test_scoring_rule_fingerprint():
-    assert mask_config_hash(load_mask_config()) == "923539fb1199d6d1d177cf31a469693540b39f53a22e2e4e462bb35c03cf0a17"
+    assert mask_config_hash(load_mask_config()) == "984bc4e9488887ead9f83eeccecdfe9b0b7f2903c685436bccbb323cc4401cec"
 
 
 def _score_config():

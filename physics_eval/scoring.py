@@ -700,9 +700,13 @@ def run(args: argparse.Namespace) -> None:
             "qc_flag_multiplier": 0.0 if effective_mask_policy == "hard_fail" else args.qc_flag_multiplier,
             "mask_score_thresholds": args.mask_config["components"],
             "mask_score_gamma": args.mask_config["gamma"],
-            "mask_flag_floor": args.mask_config["flag_floor"],
-            "mask_aggregation": "minimum components, then minimum objects; positive flagged-object scores have a floor",
-            "mask_missing_evidence": "ignore missing components; empty unflagged evidence receives one",
+            "mask_flagged_missing_score": args.mask_config["flagged_missing_score"],
+            "mask_aggregation": "minimum components, then minimum objects; flags do not raise component scores",
+            "mask_missing_evidence": (
+                "ignore missing components; an object with no components receives one if unflagged, "
+                "otherwise mask_flagged_missing_score; without objects, flagged evidence receives zero "
+                "and unflagged evidence receives one"
+            ),
             "tracking_policy": args.tracking_policy,
             "quality_flag_multiplier": 0.0 if args.tracking_policy == "hard_fail" else args.quality_flag_multiplier,
             "min_motion_extent_ratio": args.min_motion_extent_ratio,

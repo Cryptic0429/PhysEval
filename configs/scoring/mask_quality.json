@@ -1,6 +1,6 @@
 {
   "gamma": 0.35,
-  "flag_floor": 0.85,
+  "flagged_missing_score": 0.85,
   "window_fractions": [
     0.15,
     0.85
