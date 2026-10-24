@@ -32,7 +32,8 @@ class QmaskTests(unittest.TestCase):
 
     def test_single_scoring_rule_is_default(self):
         self.assertEqual(self.config["gamma"], .35)
-        self.assertEqual(self.config["flag_floor"], .85)
+        self.assertNotIn("flag_floor", self.config)
+        self.assertEqual(self.config["flagged_missing_score"], .85)
         self.assertEqual(len(self.config["components"]), 10)
         args = parse_score_args([])
         self.assertEqual(args.mask_config, self.config)
@@ -67,11 +68,23 @@ class QmaskTests(unittest.TestCase):
         self.assertEqual(a["score"], 0)
         self.assertEqual(a["score"], b["score"])
 
-    def test_flag_floor_only_applies_to_positive_object_scores(self):
-        obj = dict(self.obj, decision="review", area_cv=.475)
-        self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], .85)
-        obj["area_cv"] = .7
-        self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
+    def test_flags_preserve_measured_component_scores_and_zeros(self):
+        for decision in ("keep", "review", "rerun_tracking"):
+            obj = dict(self.obj, decision=decision, area_cv=.475)
+            result = compute_qmask({"objects": [obj]}, self.config)
+            self.assertAlmostEqual(result["score"], 1 - .5**.35)
+            self.assertEqual(result["objects"][0]["decision"], decision)
+            obj["area_cv"] = .7
+            self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
+
+    def test_flagged_quality_decreases_to_zero_without_a_floor(self):
+        scores = []
+        for cv in np.linspace(.25, .7, 20):
+            obj = dict(self.obj, decision="keep" if cv <= .25 else "review", area_cv=cv)
+            scores.append(compute_qmask({"objects": [obj]}, self.config)["score"])
+        self.assertEqual(scores[0], 1)
+        self.assertEqual(scores[-1], 0)
+        self.assertTrue(all(a > b for a, b in zip(scores, scores[1:])))
 
     def test_missing_coverage_reason_preserves_zero(self):
         obj = {"object_id": 1, "decision": "review", "reasons": "low_middle_coverage"}
@@ -88,6 +101,10 @@ class QmaskTests(unittest.TestCase):
         self.assertNotEqual(mask_config_hash(config), mask_config_hash(self.config))
         config["gamma"] = float("nan")
         with self.assertRaises(ValueError):
+            validate_mask_config(config)
+        config = copy.deepcopy(self.config)
+        config["flag_floor"] = .85
+        with self.assertRaisesRegex(ValueError, "flag_floor is no longer supported"):
             validate_mask_config(config)
 
     @staticmethod
@@ -149,6 +166,10 @@ class QmaskTests(unittest.TestCase):
         with patch.object(scorer, "load_json", return_value=data):
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertEqual(a["adjusted_score"],100)
+            data["mask_qc"] = {"objects": [dict(self.obj, decision="review", area_cv=.475)]}
+            a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
+            self.assertTrue(a["effective_for_score"])
+            self.assertAlmostEqual(a["adjusted_score"], 100 * (1 - .5**.35))
             data["mask_qc"] = {}
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertTrue(a["effective_for_score"])

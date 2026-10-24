@@ -38,11 +38,17 @@ The scorer applies checks in order:
 
 The mask-quality score, **Q_mask**, uses ten diagnostics: area P95/P05 ratio, area CV, box width CV, box height CV, box aspect CV, maximum log-area jump, trend scale ratio, maximum centroid step divided by diameter, translation-aligned IoU, and middle-window coverage. Each diagnostic maps normalized degradation `p` to `1-p^0.35`. Take the minimum available component score within each object, then the minimum object score across objects. Q_mask is a heuristic reliability multiplier, not a probability that tracking is correct.
 
-For an object whose decision is neither empty nor `keep`, a positive score is raised to at least **0.85**. An exact zero stays zero. The reasons `insufficient_valid_middle_frames` and, when its numerical component is missing, `low_middle_coverage` contribute a zero component before this floor is applied.
+Quality-control decisions are retained for diagnostics, but do not raise available component scores. The object score is the minimum available component score, including exact zeros. The reasons `insufficient_valid_middle_frames` and, when its numerical component is missing, `low_middle_coverage` contribute a zero component.
 
-Missing/nonfinite component values are ignored. If an object has no usable components, its score is `1` for an empty/`keep` decision and `0.85` for a flagged decision. If there are no object records, Q_mask is `1` unless the mask-QC status is `flagged`, in which case it is `0`. Only saved `mask_qc.objects` are used; no extra object-ID gate is introduced at scoring. The object-count tracking gate still applies. Reports record configuration hashes, missing components and fallback warnings in per-video Q_mask details.
+Missing/nonfinite component values are ignored. If an object has no usable components, its score is `1` for an empty/`keep` decision and `0.85` for a flagged decision, configured separately as `flagged_missing_score`. This fallback does not apply when any component score is available. If there are no object records, Q_mask is `1` unless the mask-QC status is `flagged`, in which case it is `0`. Only saved `mask_qc.objects` are used; no extra object-ID gate is introduced at scoring. The object-count tracking gate still applies. Reports record configuration hashes, missing components and fallback warnings in per-video Q_mask details.
 
 A Q_mask of zero reduces contribution to zero without changing eligibility. A missing diagnostic does not establish that the track is reliable; these fallbacks reproduce the defined scoring behavior.
+
+### Change from the supplied paper
+
+The current scorer removes the paper's `max(raw_object_score, 0.85)` uplift for flagged objects with positive scores. For example, a raw object score of `0.2154` remains `0.2154`. The separate `0.85` fallback for a flagged object with no usable diagnostics is retained. The configuration fingerprint and report fields identify this revised rule; `mask_flagged_missing_score` replaces the former `mask_flag_floor` report field.
+
+Existing paper scores and rankings describe the previous rule. Recompute score tables, plots, model rankings, automatic-human correlations, and sensitivity analyses from saved per-video results before revising the manuscript. Complete saved mask diagnostics and physical estimates can be reused without rerunning tracking. This change alone preserves eligibility, effective counts, discard rates, and which videos have a zero mask score.
 
 ## Score formula
 
@@ -103,6 +109,6 @@ python physeval.py analyze-sensitivity \
   --output-dir runs/scoring_sensitivity
 ```
 
-Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, retaining minimum aggregation and the flagged-score floor. Spring retains its own period-confidence rule. Outputs and ranks are computed anew from the supplied evidence; previously published values from other scoring rules must be recomputed.
+Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, retaining minimum aggregation and the missing-evidence fallbacks without a positive-score floor. Spring retains its own period-confidence rule. Outputs and ranks are computed anew from the supplied evidence; previously published values from other scoring rules must be recomputed.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

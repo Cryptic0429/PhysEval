@@ -78,7 +78,7 @@ Formal masks are referenced from sam2_tracks to avoid duplicating every PNG.
 - The public CLI calls functions directly; it does not run scripts via runpy.
 - The formal pipeline launches the internal tracking worker with an explicit PYTHONPATH, so a separate workspace root remains supported.
 - Research calls scorer.score_data and stable configuration APIs; it does not replace scorer.load_json.
-- Regression tests compare against a frozen, independent reference scorer, including CLI reports.
+- Regression tests compare against a frozen, independent reference scorer, including CLI reports. An explicit test-only adapter removes its historical positive-score floor; the frozen source and its provenance hash are preserved.
 - SAM2/PyTorch imports are lazy. CPU estimation, scoring, mask controls and tests do not require loading a GPU model.
 - Tests and experiments depend on the core. Core modules do not import experiment runners, maintenance scripts or tests.
 - The internal worker parses --help before loading any third-party package.

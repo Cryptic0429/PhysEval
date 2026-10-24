@@ -13,9 +13,11 @@ def validate_mask_config(config: dict) -> dict:
     gamma = float(config["gamma"])
     if not math.isfinite(gamma) or gamma <= 0:
         raise ValueError("gamma must be finite and positive")
-    floor = float(config["flag_floor"])
-    if not math.isfinite(floor) or not 0 <= floor <= 1:
-        raise ValueError("flag_floor must be between zero and one")
+    if "flag_floor" in config:
+        raise ValueError("flag_floor is no longer supported; mask component scores are not raised")
+    missing_score = float(config["flagged_missing_score"])
+    if not math.isfinite(missing_score) or not 0 <= missing_score <= 1:
+        raise ValueError("flagged_missing_score must be between zero and one")
     start, end = config["window_fractions"]
     if not 0 <= start < end <= 1:
         raise ValueError("invalid mask diagnostic window")

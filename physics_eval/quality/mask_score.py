@@ -1,4 +1,4 @@
-"""Mask reliability: minimum components and objects, with flagged-score floor."""
+"""Mask reliability from minimum component and object scores."""
 from __future__ import annotations
 
 import math
@@ -38,8 +38,8 @@ def compute_qmask(evidence: dict, config: dict | None = None) -> dict:
     """Score saved ``objects`` evidence without adding eligibility gates.
 
     Missing diagnostics are ignored. Without components an unflagged object
-    receives one and a flagged object receives flag_floor. With components,
-    the floor applies only to positive scores; measured zeros stay zero.
+    receives one and a flagged object receives flagged_missing_score. Available
+    component scores are never raised because of a quality-control flag.
     """
     config = load_mask_config() if config is None else validate_mask_config(config)
     objects = evidence.get("objects") or []
@@ -65,10 +65,8 @@ def compute_qmask(evidence: dict, config: dict | None = None) -> dict:
             components["middle_coverage"] = 0.0
         if components:
             score = min(components.values())
-            if decision not in ("", "keep") and score > 0.0:
-                score = max(score, config["flag_floor"])
         else:
-            score = 1.0 if decision in ("", "keep") else config["flag_floor"]
+            score = 1.0 if decision in ("", "keep") else config["flagged_missing_score"]
         scored.append({"object_id": obj.get("object_id"), "score": score,
                        "components": components, "decision": obj.get("decision")})
     score = min(item["score"] for item in scored) if scored else (0.0 if flagged else 1.0)

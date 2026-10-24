@@ -163,7 +163,9 @@ adjusted_score = physical_accuracy_score
 
 `tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. A flagged object with a positive score has a minimum weight of `0.85`; an exact zero remains zero. Missing components are ignored; an object with no components receives `1` when unflagged or `0.85` when flagged. With no objects, unflagged evidence receives `1` and flagged evidence receives `0`. These fallbacks do not establish that tracking is correct. Q_mask supplies the multiplier above without changing effective eligibility.
+The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. Quality-control flags do not raise available component scores. Missing components are ignored; an object with no components receives `1` when unflagged or `0.85` when flagged (`flagged_missing_score`). This missing-evidence fallback is separate from component scoring. With no objects, unflagged evidence receives `1` and flagged evidence receives `0`. These fallbacks do not establish that tracking is correct. Q_mask supplies the multiplier above without changing effective eligibility.
+
+The current scorer removes the positive flagged-object score floor used in the supplied paper. Saved scores, model rankings, human-score correlations, and sensitivity results must be recomputed before updating the paper or comparing them with this revision. Saved physical estimates and complete mask diagnostics can be reused; tracking and effective-video eligibility rules are unchanged.
 
 | Reported quantity | Interpretation |
 | --- | --- |
@@ -250,7 +252,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-sensitivity` varies scoring parameters on saved results while retaining minimum aggregation and the flagged-score floor.
+`analyze-sensitivity` varies scoring parameters on saved results while retaining minimum aggregation and the missing-evidence fallbacks. Available component scores have no flagged-object floor.
 
 ## 🔍 Scope and Assumptions
 
