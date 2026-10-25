@@ -5,7 +5,7 @@
 This directory contains the prompt table and evaluation metadata used by the
 PhysEval / PhysT2V-Bench pipeline.
 
-The release follows the paper's central dataset principle: every generated video is tied to one primary physical quantity that can be estimated from tracked motion. Each instance therefore has one target value and one primary evaluator instead of asking a judge to assess several loosely related physical effects at once.
+The dataset is structured so that each generated video is evaluated against one primary physical quantity estimated from tracked motion, pairing each instance with a single target value and dedicated evaluator.
 
 ## Files
 
@@ -47,7 +47,7 @@ instances per metric.
 | Conservation | `mechanical_energy_conservation` | 1 | Potential-to-kinetic energy ratio | Required |
 | Conservation | `momentum_conservation_1d` | 2 | Relative pre/post momentum error | Not required when scale is shared |
 
-The prompts are written for short monocular videos with a fixed camera, approximately planar motion parallel to the image plane, visible target boundaries, and minimal clutter or occlusion. These are measurement assumptions, not guarantees: generated videos can still violate them, which is why the evaluation pipeline applies tracking and physics-validity gates and a continuous mask-reliability score.
+The prompts are written for short monocular videos with a fixed camera, approximately planar motion parallel to the image plane, visible target boundaries, and minimal clutter or occlusion. The evaluation pipeline applies tracking-quality gates, physics-validity checks, and continuous mask reliability to account for deviations from these assumptions in generated videos.
 
 ## Prompt Workbook
 
@@ -88,42 +88,18 @@ The schema separates natural-language generation from evaluation instructions. I
 
 - `Num_Objects` is part of the hard tracking-quality gate; momentum requires two persistent tracks while the other current tasks expect one.
 - `Scale_Mode` indicates whether a known-size object provides meters-per-pixel calibration or whether the evaluator uses a ratio-only / period-only quantity for which spatial scale cancels.
-- `Known_Parameters_JSON` stores only evaluator inputs such as mass, gravity, object radius, or fluid density; it is not appended to the generated video after the fact.
+- `Known_Parameters_JSON` provides auxiliary physical constants and object parameters (such as mass, fluid density, or reference dimensions) required by specific inverse evaluators.
 - `Target_Value` and `Target_Unit` define the auditable numerical quantity used to compute relative error.
 
 ## How to Use
 
-Generate videos using the prompts in `phys_t2v_bench_prompts.xlsx`, name each
-video according to `Video_File`, and place the files under a model-specific
-video root such as:
+Generate videos using the prompts in `phys_t2v_bench_prompts.xlsx`, and name each video according to the corresponding `Video_File` column. Evaluation matches generated videos strictly by filename against the `Video_File` column in the metadata. Place the generated videos under a model-specific directory:
 
 ```text
 data/t2v_videos/<model_name>/
 ```
 
-Run from the repository root (the directory containing `physeval.py`):
-
-```bash
-python physeval.py eval \
-  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
-  --video-root data/t2v_videos/<model_name> \
-  --output-dir batch_eval_results/<model_name>
-```
-
-Automatic initialization always tries YOLO first, then falls back to motion detection on failure or insufficient usable target prompts. The required count comes from `Num_Objects`; both paths must supply that count. The adopted source and fallback reason are saved with the tracking evidence. No detector choice is required.
-
-The prompts request controlled views because the current inverse-physics models operate on 2D image trajectories. Do not crop, rename, reorder by folder position, or manually filter generated videos before evaluation; the metadata keys and exact `Video_File` names are the source of truth.
-
-Score the outputs with:
-
-```bash
-python physeval.py score \
-  --result-root batch_eval_results/<model_name> \
-  --model-name <model_name> \
-  --weak-valid-multiplier 0.8
-```
-
-The explicit multiplier matches the paper protocol and is also the CLI default. See the [scoring guide](../../SCORING_USAGE.md) for effective-video score, discard rate, and supplementary end-to-end score, and the [architecture guide](../../docs/ARCHITECTURE.md) for the complete workflow.
+For instructions on running batch evaluation, tracking, and scoring, see the [Batch Guide](../../BATCH_USAGE.md) and [Scoring Guide](../../SCORING_USAGE.md).
 
 ## Validation
 

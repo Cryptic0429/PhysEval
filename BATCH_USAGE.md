@@ -4,30 +4,24 @@
 
 This guide covers the executable pipeline behind the evaluation protocol described in the PhysEval paper: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
 
-The batch stage records measurability checks and estimates each video's physical quantity; model-level scoring applies the gates and is a separate step. Under the paper's default protocol, expected-object-count and meaningful-motion checks are hard tracking gates, evaluator status is the second hard gate, and mask reliability enters the score as a soft multiplier.
+The batch stage performs tracking and estimates physical quantities for each video. Model-level scoring applies eligibility gates and aggregates results in a separate step.
 
-Use the unified public entry point from the repository root:
+Run the batch evaluation from the repository root:
 
 ```bash
-cd /path/to/PhysEval
-python physeval.py eval
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --video-root data/t2v_videos/my_model \
+  --output-dir batch_eval_results/my_model
 ```
 
-By default it uses:
+The pipeline uses the following default asset and output locations:
 
 ```text
-metadata    data/metadata/*.xlsx, if there is exactly one file
-videos      data/t2v_videos
 sam2 repo   repo/sam2
 outputs     batch_eval_results
 init policy YOLO first, motion fallback (fixed)
 yolo model  yolov8n.pt, if it exists under workspace root
-```
-
-Metadata auto-discovery is convenient for local workspaces. For the released 500-prompt benchmark, pass the repository workbook explicitly:
-
-```text
-benchmark/metadata/phys_t2v_bench_metadata.xlsx
 ```
 
 Default output layout:
@@ -62,7 +56,7 @@ batch_eval_results/<metric>/<prompt_id>/tracking_points.json
 
 These markers are written during batch processing and are later used by scoring. Mask PNGs remain under `sam2_tracks/<scene>/masks/` and are referenced from the tracking evidence; extracted frames are under `data/custom/<scene>/frames/`. Preserve these referenced assets when moving results or recomputing diagnostics.
 
-Each compact record preserves the benchmark specification, physics output, tracking status, mask diagnostics, target and measured values, relative error when available, and reason tokens. This is the auditable unit that is later aggregated into effective-video scores and discard diagnostics.
+Each compact record preserves the benchmark metadata, physics output, tracking status, mask diagnostics, target and measured values, relative error when available, and failure reasons.
 
 ## Running One Model on the Released 500-Prompt Benchmark
 
@@ -78,7 +72,7 @@ data/t2v_videos/<model_name>/
   P050.mp4
 ```
 
-Video order in the folder does not matter. The batch script looks up each file by the exact value in the Excel `Video_File` column. On Linux servers, names are case-sensitive, so `V001.mp4` and `v001.mp4` are different files.
+Video order in the folder does not matter. The batch script looks up each file by the exact value in the Excel `Video_File` column.
 
 If you are comparing multiple text-to-video models, keep one output directory per model:
 
@@ -94,18 +88,17 @@ After the batch run, score that model with:
 ```bash
 python physeval.py score \
   --result-root batch_eval_results/model_a \
-  --model-name model_a \
-  --weak-valid-multiplier 0.8
+  --model-name model_a
 ```
 
-The explicit `0.8` matches the paper protocol and is also the CLI default; see [SCORING_USAGE.md](SCORING_USAGE.md).
+See [SCORING_USAGE.md](SCORING_USAGE.md) for detailed scoring options.
 
 ## Common Commands
 
 Run all rows in the metadata:
 
 ```bash
-python physeval.py eval
+python physeval.py eval --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx
 ```
 
 Run one row by `Index`:
@@ -178,7 +171,7 @@ YOLO candidate generation applies the target-class, confidence, and geometry fil
 
 The scan defaults to up to 60 uniformly sampled frames, so initialization need not start at frame zero. YOLO provides initial prompts; it is not rerun to recover lost tracks. SAM2 performs video propagation. Formal evaluation always follows this fixed protocol.
 
-The adopted source is saved as `auto_yolo` or `auto_motion`; motion candidates retain `yolo_fallback_reason`. Inspect `tracking_points.json` and `run_config.json` to distinguish attempted YOLO detection from adopted YOLO initialization. Keep these records when reporting how often each path was used.
+The adopted source is saved as `auto_yolo` or `auto_motion` in `tracking_points.json` and `run_config.json`, with motion candidates recording the `yolo_fallback_reason`.
 
 Use a specific YOLO weights file when required by a declared experimental setup:
 
@@ -186,7 +179,7 @@ Use a specific YOLO weights file when required by a declared experimental setup:
 python physeval.py eval --yolo-weights yolov8n.pt
 ```
 
-Manual prompt metadata is also supported. Renderer ground-truth initialization requires the explicit `--allow-renderer-gt-init` flag, records its supervision provenance, and must be reported separately from automatic evaluation. Reusing tracks or estimating from existing tracks does not rerun initialization.
+Manual prompt metadata is also supported. Renderer ground-truth initialization requires the explicit `--allow-renderer-gt-init` flag for controlled experiments. Reusing tracks or estimating from existing tracks does not rerun initialization.
 
 ## Mask QC Behavior
 
@@ -249,22 +242,6 @@ Num_Objects = 2
 
 The current two-object evaluator is `eval_momentum_1d` for one-dimensional momentum conservation.
 
-## Optional Check Commands
-
-These commands are not required for every run. Use them after copying code to the server or after editing code.
-
-Syntax check:
-
-```bash
-python -m compileall -q physics_eval experiments validation tools tests
-```
-
-Show available options:
-
-```bash
-python physeval.py eval --help
-```
-
 ## Result Files Used by Model-Level Scoring
 
 The model-level scoring script reads:
@@ -291,8 +268,7 @@ After a batch run finishes, score the compact results with:
 ```bash
 python physeval.py score \
   --result-root batch_eval_results \
-  --model-name my_model \
-  --weak-valid-multiplier 0.8
+  --model-name my_model
 ```
 
 Detailed scoring rules are documented in:

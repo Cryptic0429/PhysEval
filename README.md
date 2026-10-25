@@ -96,7 +96,7 @@ data/t2v_videos/my_model/
 └── P050.mp4
 ```
 
-Generated videos and external model assets are supplied locally. Match videos by metadata keys and filenames; keep failed generations in the evaluation accounting.
+Generated videos and external model assets are supplied locally. Match videos by metadata keys and filenames.
 
 ## 🚀 Running Evaluation
 
@@ -141,11 +141,10 @@ After the full evaluation, aggregate results using the PhysEval scoring rules:
 ```bash
 python physeval.py score \
   --result-root batch_eval_results/my_model \
-  --model-name my_model \
-  --weak-valid-multiplier 0.8
+  --model-name my_model
 ```
 
-The explicit `0.8` is the paper-specified weight for `weak_valid` estimates and is also the CLI default. The scorer checks benchmark completeness by default. For a partial smoke test, add `--metadata none`.
+The scorer defaults to a `weak_valid` multiplier of 0.8 and checks benchmark completeness. For a partial smoke test, add `--metadata none`.
 
 ## 📊 Scoring and Reports
 
@@ -163,9 +162,7 @@ adjusted_score = physical_accuracy_score
 
 `tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. Quality-control flags do not raise available component scores. Missing individual components are ignored, but every object must have at least one computable component and the object list must be nonempty. Missing object diagnostics stop scoring with an error instead of receiving a default score; regenerate diagnostics with `eval` from the supplied masks. Explicit diagnosed failures, such as insufficient valid middle frames, still contribute zero. Q_mask supplies the multiplier above without changing effective eligibility.
-
-This scorer implementation matches the unified mask-reliability rule in the paper (no positive flagged-object score floor and no default fallback scores for missing object-level mask evidence).
+The **mask-quality score, Q_mask**, uses ten diagnostics (including normalized centroid step). Each component maps threshold-normalized degradation `p` to `1 - p^0.35`, and scores take the minimum across components and objects. Quality-control flags do not alter component scores. Missing individual components are ignored, while explicit diagnosed failures (such as insufficient valid middle frames) contribute zero. Scored videos must retain valid object-level diagnostics; if missing, scoring halts to prompt regeneration via `eval` rather than imputing default scores. Q_mask scales the adjusted score without changing effective eligibility.
 
 | Reported quantity | Interpretation |
 | --- | --- |
@@ -179,7 +176,7 @@ Reports are saved under `batch_eval_results/my_model/score_reports/all_metrics/`
 
 | Output | Contents |
 | --- | --- |
-| `score_summary.json` | Model and metric summaries, scoring settings, and a mask-configuration fingerprint |
+| `score_summary.json` | Model and metric summaries, scoring settings, and configuration details |
 | `metric_scores.csv` | Per-metric scores and measurability statistics |
 | `per_video_scores.csv` | Per-video measurements, quality factors, statuses, and scores |
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons |
@@ -233,10 +230,10 @@ The [architecture guide](docs/ARCHITECTURE.md) describes the complete workflow a
 ## 🧪 Research, Validation and Maintenance
 
 ```bash
-# Analyze saved results without retracking (the six-model/3,000-video cohort).
-python physeval.py analyze-sensitivity --results-root ../results --output-dir runs/sensitivity
+# Analyze saved results across scoring settings without retracking.
+python physeval.py analyze-sensitivity --results-root batch_eval_results/my_model --output-dir runs/sensitivity
 
-# Controlled mask checks, including a stable wrong-target negative control.
+# Run controlled synthetic-mask checks.
 python physeval.py validate-masks --output runs/validation/mask_controls.csv
 
 # Inspect a curated open-video package without requiring GPU inference.
@@ -252,7 +249,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-sensitivity` varies scoring parameters on saved results while requiring computable object diagnostics and retaining minimum aggregation. Available component scores have no flagged-object floor or missing-evidence default.
+`analyze-sensitivity` varies scoring parameters across saved results to test sensitivity to tolerances, validity weights, and mask thresholds.
 
 ## 🔍 Scope and Assumptions
 

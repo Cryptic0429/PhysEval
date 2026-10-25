@@ -1,6 +1,6 @@
 # Scoring Batch Results
 
-This guide explains how PhysEval turns per-video `result.json` files into model and metric scores. Run the commands from the repository root. For the complete evaluation workflow, see [BATCH_USAGE.md](BATCH_USAGE.md).
+This guide explains how PhysEval turns per-video `result.json` files into model and metric scores. For the complete evaluation workflow, see [BATCH_USAGE.md](BATCH_USAGE.md).
 
 ## Run the scorer
 
@@ -36,19 +36,13 @@ The scorer applies checks in order:
 2. **Physics validity:** the evaluator must return `valid` or `weak_valid`. `invalid` and `failed` videos are excluded.
 3. **Mask quality:** after both hard checks pass, mask evidence supplies a continuous multiplier in `[0, 1]`. A low measured value reduces the score but does not itself exclude the video.
 
-The mask-quality score, **Q_mask**, uses ten diagnostics: area P95/P05 ratio, area CV, box width CV, box height CV, box aspect CV, maximum log-area jump, trend scale ratio, maximum centroid step divided by diameter, translation-aligned IoU, and middle-window coverage. Each diagnostic maps normalized degradation `p` to `1-p^0.35`. Take the minimum available component score within each object, then the minimum object score across objects. Q_mask is a heuristic reliability multiplier, not a probability that tracking is correct.
+The mask-quality score, **Q_mask**, uses ten diagnostics: area P95/P05 ratio, area CV, box width CV, box height CV, box aspect CV, maximum log-area jump, trend scale ratio, maximum centroid step divided by diameter, translation-aligned IoU, and middle-window coverage. Each diagnostic maps normalized degradation `p` to `1-p^0.35`. Scores take the minimum available component score within each object, then the minimum object score across objects.
 
-Quality-control decisions are retained for diagnostics, but do not raise available component scores. The object score is the minimum available component score, including exact zeros. The reasons `insufficient_valid_middle_frames` and, when its numerical component is missing, `low_middle_coverage` contribute a zero component.
+Quality-control decisions are recorded for diagnostics, while scores are derived from continuous component values. The object score is the minimum available component score, and explicit diagnosed failures (e.g., `insufficient_valid_middle_frames`) contribute zero.
 
-Missing/nonfinite individual component values are ignored. The object list must be nonempty and each object must have at least one computable component, including an explicit zero for a diagnosed failure. Otherwise scoring stops with a `ValueError` identifying the result and object, without assigning `0.85`, `1`, or another default score. This requirement also applies to the `penalty` and `hard_fail` policies; only the explicit `--mask-policy ignore` ablation bypasses mask scoring. Reports record configuration hashes, missing individual components and their warnings in per-video Q_mask details.
+Missing individual component values are ignored, but each object must have at least one computable component. Missing object diagnostics halt scoring with an error rather than receiving imputed default scores. A zero Q_mask reduces the adjusted score contribution to zero without altering effective eligibility.
 
-A Q_mask of zero from a measured component or explicit diagnosed failure reduces contribution to zero without changing eligibility. Missing evidence is an input error rather than a zero-score or excluded sample. A missing individual diagnostic does not establish that the track is reliable.
-
-The scorer reads saved `mask_qc.objects`; providing PNGs alone does not regenerate diagnostics during `score`. Run `eval` first to generate them from the masks. With complete saved tracking files and masks, `eval --reuse-tracking` can regenerate diagnostics without rerunning SAM2.
-
-### Alignment with the paper
-
-The scorer implements the paper's mask-reliability rule directly: object scores take the minimum available component score (`min_j q_{oj}`) without a positive-score floor for flagged objects, and scoring requires nonempty object diagnostics with at least one computable component per object rather than assigning default fallback scores. The configuration fingerprint identifies this rule; neither `mask_flag_floor` nor `mask_flagged_missing_score` is emitted in reports. Complete saved mask diagnostics and physical estimates can be reused without rerunning tracking.
+The scorer reads saved `mask_qc.objects`. Run `eval` first to generate them from the masks. With complete saved tracking files and masks, `eval --reuse-tracking` can regenerate diagnostics without rerunning SAM2.
 
 ## Score formula
 
@@ -64,8 +58,6 @@ adjusted_score = physical_accuracy_score
 ```
 
 `tau` is a metric-specific tolerance: a smaller value penalizes the same error more strongly. The default tracking multiplier is `1` for a pass and `0` for a flagged track. Estimation validity uses `1` for `valid`, `0.8` for `weak_valid`, and `0` for `invalid` or `failed`.
-
-For example, with a physical-accuracy score of `70`, a passing track, mask quality `0.6`, and `weak_valid` status, the adjusted score is `70 × 1 × 0.6 × 0.8 = 33.6`.
 
 ## Read the results
 
@@ -90,25 +82,25 @@ With `--metric`, the final directory is the metric name instead of `all_metrics`
 
 | File | Contents |
 | --- | --- |
-| `score_summary.json` | Model summary, scoring settings, mask-configuration fingerprint, metric summaries and per-video records. |
+| `score_summary.json` | Model summary, scoring settings, metric summaries, and per-video records. |
 | `metric_scores.csv` | One summary row per metric. |
 | `per_video_scores.csv` | Per-video status, scores, quality factors and failure reasons. |
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons. |
 | `plots/` | Score and discard charts, unless `--no-plots` is used. |
 
-The scorer checks result IDs against benchmark metadata by default. If result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. Missing required mask diagnostics stop scoring as described above. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
+The scorer checks result IDs against benchmark metadata by default. If result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. Missing required mask diagnostics stop scoring as described above. A `valid` or `weak_valid` result without a computable physical error indicates an unexpected evaluator output and stops scoring by default.
 
 ## Saved-evidence research analyses
 
 The formal scorer is implemented in `physics_eval/scoring.py`; experiment modules call its explicit data interface without retracking or replacing its loaders. Use a fresh output directory for each analysis:
 
 ```bash
-# One-factor sensitivity over the saved six-model / 3,000-result cohort.
+# Sensitivity analysis across scoring parameters
 python physeval.py analyze-sensitivity \
-  --results-root ../results \
+  --results-root batch_eval_results/my_model \
   --output-dir runs/scoring_sensitivity
 ```
 
-Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, requiring computable object diagnostics and retaining minimum aggregation without a positive-score floor or missing-evidence defaults. Spring retains its own period-confidence rule.
+Sensitivity analysis runs on saved results to test robustness across gamma, validity weights, and fit thresholds.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

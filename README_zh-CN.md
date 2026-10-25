@@ -96,7 +96,7 @@ data/t2v_videos/my_model/
 └── P050.mp4
 ```
 
-生成视频和外部模型资源需在本地准备。以元数据键和文件名匹配视频，并将生成失败的样本保留在评测统计中。
+生成视频和外部模型资源需在本地准备。评测程序根据元数据中的文件名匹配视频。
 
 ## 🚀 运行评测
 
@@ -141,11 +141,10 @@ python physeval.py eval \
 ```bash
 python physeval.py score \
   --result-root batch_eval_results/my_model \
-  --model-name my_model \
-  --weak-valid-multiplier 0.8
+  --model-name my_model
 ```
 
-显式指定的 `0.8` 是论文规定的 `weak_valid` 估计权重，也是命令行默认值。评分程序默认检查基准结果的完整性。如仅为部分样本做流程检查，可添加 `--metadata none`。
+评分程序默认采用 0.8 的 `weak_valid` 权重并检查基准结果完整性。如仅为部分样本做流程检查，可添加 `--metadata none`。
 
 ## 📊 评分与报告
 
@@ -163,9 +162,7 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 
 `tau` 是各指标对应的误差容忍度。通过跟踪检查的质量系数为 `1`；估计有效性系数在 `valid` 时为 `1`，在 `weak_valid` 时为 `0.8`。
 
-**掩膜质量评分 Q_mask**使用包括中心跳步在内的十项诊断，将阈值归一化的劣化程度 `p` 映射为 `1-p^0.35`，先在对象内取最小分，再在对象间取最小分。异常标记不抬高已有诊断分数。单项缺失分量被忽略，但对象诊断列表必须非空，且每个对象至少有一个可计算分量。缺少所需对象诊断时，程序报错并停止评分，不默认赋分；请通过 `eval` 从提供的 mask 重新生成诊断。有效中段帧不足等明确诊断出的失败仍贡献零分。Q_mask 只作为上述公式中的乘数，不单独改变有效资格。
-
-当前评分器实现与论文中的掩膜可靠性评分规则完全对齐（不设被标记对象正分下限，且缺失对象级掩膜证据时不赋予默认兜底分）。
+**掩膜质量评分 Q_mask**使用包括归一化质心跳步在内的十项诊断，将阈值归一化的劣化程度 `p` 映射为 `1 - p^0.35`，在分量与对象间取最小值聚合。异常标记不改变已有分量分值；单项缺失分量被忽略，而有效中段帧不足等明确诊断出的失败贡献零分。评测样本必须保留有效的对象级掩膜诊断，缺失时程序报错提示重新生成而非赋予兜底分。Q_mask 作为乘数调整最终得分，不单独改变有效资格。
 
 | 报告量 | 含义 |
 | --- | --- |
@@ -179,7 +176,7 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 
 | 输出 | 内容 |
 | --- | --- |
-| `score_summary.json` | 模型与指标汇总、评分设置和规则指纹 |
+| `score_summary.json` | 模型与指标汇总、评分设置与配置信息 |
 | `metric_scores.csv` | 各指标得分与可测量性统计 |
 | `per_video_scores.csv` | 逐视频测量值、质量因素、状态和分数 |
 | `score_exclusion_reasons.csv` | 各类剔除原因的计数 |
@@ -233,10 +230,10 @@ PhysEval/
 ## 🧪 研究分析、验证与维护
 
 ```bash
-# 基于已保存结果分析评分敏感性，不重新跟踪（六模型/3,000 视频队列）。
-python physeval.py analyze-sensitivity --results-root ../results --output-dir runs/sensitivity
+# 基于已有评测结果分析评分敏感性，无需重新跟踪。
+python physeval.py analyze-sensitivity --results-root batch_eval_results/my_model --output-dir runs/sensitivity
 
-# 可控掩膜对照，包含稳定跟错目标的负对照。
+# 运行可控合成掩膜检验。
 python physeval.py validate-masks --output runs/validation/mask_controls.csv
 
 # 检查真实视频验证包，可跳过 GPU 推理环境检查。
@@ -252,7 +249,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-sensitivity` 在已保存结果上改变评分参数，要求对象诊断可计算并保留最小值聚合；不再应用被标记对象的正分下限或缺失证据默认分。
+`analyze-sensitivity` 在已有结果上调整容忍度、有效性权重和掩膜阈值等参数，评估最终排名的敏感性。
 
 ## 🔍 适用范围与假设
 
