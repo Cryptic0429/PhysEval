@@ -84,7 +84,7 @@ def test_estimator_baseline_measurements(name, expected, status):
 
 
 def test_scoring_rule_fingerprint():
-    assert mask_config_hash(load_mask_config()) == "984bc4e9488887ead9f83eeccecdfe9b0b7f2903c685436bccbb323cc4401cec"
+    assert mask_config_hash(load_mask_config()) == "bd6de9c8be36f3499ca2e55c1d3c0a99021dcccdecbaa24d45a535eda8dffc08"
 
 
 def _score_config():
@@ -114,7 +114,7 @@ def _score_evidence():
     }
 
 
-def test_in_memory_scoring_matches_reference_gates_and_missing_evidence_behavior(tmp_path):
+def test_in_memory_scoring_preserves_gates_and_requires_mask_evidence(tmp_path):
     args = _score_config()
     data = _score_evidence()
     path = tmp_path / "result.json"
@@ -130,10 +130,8 @@ def test_in_memory_scoring_matches_reference_gates_and_missing_evidence_behavior
 
     missing = copy.deepcopy(data)
     missing["mask_qc"] = {}
-    unavailable = score(missing)
-    assert unavailable["effective_for_score"]
-    assert unavailable["adjusted_score"] == pytest.approx(original["adjusted_score"])
-    assert unavailable["score_available"]
+    with pytest.raises(ValueError, match="Mask diagnostics missing"):
+        score(missing)
 
     for section, status, reason in [
         ("tracking_quality", "flagged", "tracking_quality_failed"),

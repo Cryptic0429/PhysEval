@@ -163,9 +163,9 @@ adjusted_score = physical_accuracy_score
 
 `tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. Quality-control flags do not raise available component scores. Missing components are ignored; an object with no components receives `1` when unflagged or `0.85` when flagged (`flagged_missing_score`). This missing-evidence fallback is separate from component scoring. With no objects, unflagged evidence receives `1` and flagged evidence receives `0`. These fallbacks do not establish that tracking is correct. Q_mask supplies the multiplier above without changing effective eligibility.
+The **mask-quality score, Q_mask**, uses ten diagnostics, including centroid step. Each component maps threshold-normalized degradation `p` to `1 - p^0.35`. Scores take the minimum within each object and then across objects. Quality-control flags do not raise available component scores. Missing individual components are ignored, but every object must have at least one computable component and the object list must be nonempty. Missing object diagnostics stop scoring with an error instead of receiving a default score; regenerate diagnostics with `eval` from the supplied masks. Explicit diagnosed failures, such as insufficient valid middle frames, still contribute zero. Q_mask supplies the multiplier above without changing effective eligibility.
 
-The current scorer removes the positive flagged-object score floor used in the supplied paper. Saved scores, model rankings, human-score correlations, and sensitivity results must be recomputed before updating the paper or comparing them with this revision. Saved physical estimates and complete mask diagnostics can be reused; tracking and effective-video eligibility rules are unchanged.
+This scorer implementation matches the unified mask-reliability rule in the paper (no positive flagged-object score floor and no default fallback scores for missing object-level mask evidence).
 
 | Reported quantity | Interpretation |
 | --- | --- |
@@ -173,7 +173,7 @@ The current scorer removes the positive flagged-object score floor used in the s
 | **Discard rate** | Fraction of videos that fail tracking quality, physics validity, or both. |
 | **End-to-end score** | Supplementary mean over all videos, assigning zero to discarded videos. |
 
-Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs are incomplete or an eligible physical estimate cannot be scored. Missing mask diagnostics follow the fallbacks above.
+Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs are incomplete, an eligible physical estimate cannot be scored, or required object-level mask diagnostics are missing. The explicit `--mask-policy ignore` ablation bypasses mask scoring.
 
 Reports are saved under `batch_eval_results/my_model/score_reports/all_metrics/`:
 
@@ -252,7 +252,7 @@ python -m pip install -r requirements-test.txt
 python -m pytest tests
 ```
 
-`analyze-sensitivity` varies scoring parameters on saved results while retaining minimum aggregation and the missing-evidence fallbacks. Available component scores have no flagged-object floor.
+`analyze-sensitivity` varies scoring parameters on saved results while requiring computable object diagnostics and retaining minimum aggregation. Available component scores have no flagged-object floor or missing-evidence default.
 
 ## 🔍 Scope and Assumptions
 

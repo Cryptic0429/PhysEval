@@ -9,6 +9,9 @@ flagged-score floor; production scoring no longer applies that floor.
 For current per-video, aggregate and CLI comparisons, the tests load an isolated
 copy of the historical module and explicitly replace only its object-score
 aggregation: when components are available, use their minimum without an uplift.
-The independent component calculations, missing-evidence fallbacks, gates and
-model aggregation remain supplied by the frozen source. The fixture itself is
-not rewritten and is not a selectable production scoring mode.
+These replay inputs provide computable object diagnostics. The independent
+component calculations, gates and model aggregation remain supplied by the
+frozen source. Production now rejects empty object evidence or an object with
+no computable components; separate contract tests cover those errors instead
+of replaying the fixture's historical missing-evidence defaults. The fixture
+itself is not rewritten and is not a selectable production scoring mode.

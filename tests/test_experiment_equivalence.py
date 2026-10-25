@@ -27,8 +27,9 @@ REFERENCE = ROOT / "tests/fixtures/reference_score.py"
 def remove_positive_floor(reference):
     """Adapt only the intentional rule change in an isolated historical module.
 
-    The frozen scorer still supplies its independent component calculations,
-    fallbacks, gates and aggregation. Its source and provenance hash stay intact.
+    Replay inputs provide computable object diagnostics. The frozen scorer still
+    supplies independent component calculations, gates and aggregation. Its
+    source and provenance hash stay intact; missing-input errors are tested separately.
     """
     original = reference.object_mask_quality_score
 
@@ -82,13 +83,14 @@ def _write_results(root: Path, count=256) -> list[Path]:
         if index % 7 == 0:
             physics.pop("Relative_Error")
         objects = []
-        for oid in range(1, 1 + index % 3):
+        for oid in range(1, 2 + index % 3):
             obj = {"object_id": oid, "decision": rng.choice(["", "keep", "review", None]),
                    "reasons": rng.choice(["", "large_area_ratio", "low_middle_coverage", "insufficient_valid_middle_frames"])}
             for name, spec in config["components"].items():
                 progress = rng.choice([0., .25, .5, .999, 1., None])
                 if progress is not None:
                     obj[name] = spec["good_value"] + progress*(spec["bad_value"]-spec["good_value"])
+            obj.setdefault("middle_coverage", 1.0)
             objects.append(obj)
         path = root / metric / f"P{index:03d}" / "result.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +157,8 @@ def test_cli_reports_match_reference_and_have_no_version_directory(tmp_path):
     settings = current["scoring"]
     assert settings["mask_score_gamma"] == .35
     assert "mask_flag_floor" not in settings
-    assert settings["mask_flagged_missing_score"] == .85
+    assert "mask_flagged_missing_score" not in settings
+    assert "otherwise stop scoring" in settings["mask_missing_evidence"]
     assert "mask_quality_config_hash" in settings
     assert not any("protocol" in key for key in settings)
 

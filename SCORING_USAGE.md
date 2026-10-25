@@ -40,15 +40,15 @@ The mask-quality score, **Q_mask**, uses ten diagnostics: area P95/P05 ratio, ar
 
 Quality-control decisions are retained for diagnostics, but do not raise available component scores. The object score is the minimum available component score, including exact zeros. The reasons `insufficient_valid_middle_frames` and, when its numerical component is missing, `low_middle_coverage` contribute a zero component.
 
-Missing/nonfinite component values are ignored. If an object has no usable components, its score is `1` for an empty/`keep` decision and `0.85` for a flagged decision, configured separately as `flagged_missing_score`. This fallback does not apply when any component score is available. If there are no object records, Q_mask is `1` unless the mask-QC status is `flagged`, in which case it is `0`. Only saved `mask_qc.objects` are used; no extra object-ID gate is introduced at scoring. The object-count tracking gate still applies. Reports record configuration hashes, missing components and fallback warnings in per-video Q_mask details.
+Missing/nonfinite individual component values are ignored. The object list must be nonempty and each object must have at least one computable component, including an explicit zero for a diagnosed failure. Otherwise scoring stops with a `ValueError` identifying the result and object, without assigning `0.85`, `1`, or another default score. This requirement also applies to the `penalty` and `hard_fail` policies; only the explicit `--mask-policy ignore` ablation bypasses mask scoring. Reports record configuration hashes, missing individual components and their warnings in per-video Q_mask details.
 
-A Q_mask of zero reduces contribution to zero without changing eligibility. A missing diagnostic does not establish that the track is reliable; these fallbacks reproduce the defined scoring behavior.
+A Q_mask of zero from a measured component or explicit diagnosed failure reduces contribution to zero without changing eligibility. Missing evidence is an input error rather than a zero-score or excluded sample. A missing individual diagnostic does not establish that the track is reliable.
 
-### Change from the supplied paper
+The scorer reads saved `mask_qc.objects`; providing PNGs alone does not regenerate diagnostics during `score`. Run `eval` first to generate them from the masks. With complete saved tracking files and masks, `eval --reuse-tracking` can regenerate diagnostics without rerunning SAM2.
 
-The current scorer removes the paper's `max(raw_object_score, 0.85)` uplift for flagged objects with positive scores. For example, a raw object score of `0.2154` remains `0.2154`. The separate `0.85` fallback for a flagged object with no usable diagnostics is retained. The configuration fingerprint and report fields identify this revised rule; `mask_flagged_missing_score` replaces the former `mask_flag_floor` report field.
+### Alignment with the paper
 
-Existing paper scores and rankings describe the previous rule. Recompute score tables, plots, model rankings, automatic-human correlations, and sensitivity analyses from saved per-video results before revising the manuscript. Complete saved mask diagnostics and physical estimates can be reused without rerunning tracking. This change alone preserves eligibility, effective counts, discard rates, and which videos have a zero mask score.
+The scorer implements the paper's mask-reliability rule directly: object scores take the minimum available component score (`min_j q_{oj}`) without a positive-score floor for flagged objects, and scoring requires nonempty object diagnostics with at least one computable component per object rather than assigning default fallback scores. The configuration fingerprint identifies this rule; neither `mask_flag_floor` nor `mask_flagged_missing_score` is emitted in reports. Complete saved mask diagnostics and physical estimates can be reused without rerunning tracking.
 
 ## Score formula
 
@@ -96,7 +96,7 @@ With `--metric`, the final directory is the metric name instead of `all_metrics`
 | `score_exclusion_reasons.csv` | Counts of exclusion reasons. |
 | `plots/` | Score and discard charts, unless `--no-plots` is used. |
 
-The scorer checks result IDs against benchmark metadata by default. If result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. Missing mask diagnostics follow the fallback rules above. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
+The scorer checks result IDs against benchmark metadata by default. If result IDs are missing, unexpected or duplicated, it writes `incomplete_report.json` and refuses to publish a formal aggregate. Missing required mask diagnostics stop scoring as described above. A `valid` or `weak_valid` result without a computable physical error also violates the evaluator contract and stops scoring by default.
 
 ## Saved-evidence research analyses
 
@@ -109,6 +109,6 @@ python physeval.py analyze-sensitivity \
   --output-dir runs/scoring_sensitivity
 ```
 
-Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, retaining minimum aggregation and the missing-evidence fallbacks without a positive-score floor. Spring retains its own period-confidence rule. Outputs and ranks are computed anew from the supplied evidence; previously published values from other scoring rules must be recomputed.
+Sensitivity analysis uses the same scorer and saved six-model / 3,000-result cohort. Its baseline is gamma `0.35`, weak-valid weight `0.8`, and the four applicable R² cutoffs `0.65/0.85`. It varies gamma, the weak-valid weight or those cutoffs one factor at a time, requiring computable object diagnostics and retaining minimum aggregation without a positive-score floor or missing-evidence defaults. Spring retains its own period-confidence rule.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

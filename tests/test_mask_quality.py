@@ -33,7 +33,7 @@ class QmaskTests(unittest.TestCase):
     def test_single_scoring_rule_is_default(self):
         self.assertEqual(self.config["gamma"], .35)
         self.assertNotIn("flag_floor", self.config)
-        self.assertEqual(self.config["flagged_missing_score"], .85)
+        self.assertNotIn("flagged_missing_score", self.config)
         self.assertEqual(len(self.config["components"]), 10)
         args = parse_score_args([])
         self.assertEqual(args.mask_config, self.config)
@@ -50,12 +50,18 @@ class QmaskTests(unittest.TestCase):
             obj = dict(self.obj, **{name: self.config["components"][name]["bad_value"]})
             self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
 
-    def test_missing_components_and_empty_evidence_fallback(self):
-        for evidence in ({}, {"objects": []}, {"objects": [{"object_id": 1, "decision": "keep"}]}):
-            self.assertEqual(compute_qmask(evidence, self.config)["score"], 1)
-        flagged = {"objects": [{"object_id": 1, "decision": "review"}]}
-        self.assertEqual(compute_qmask(flagged, self.config)["score"], .85)
-        self.assertEqual(compute_qmask({"status": "flagged"}, self.config)["score"], 0)
+    def test_missing_object_evidence_is_an_error(self):
+        for evidence in ({}, {"objects": []}, {"status": "flagged"}):
+            with self.subTest(evidence=evidence):
+                with self.assertRaisesRegex(ValueError, "mask_qc.objects"):
+                    compute_qmask(evidence, self.config)
+
+    def test_every_object_requires_a_computable_component(self):
+        for decision in ("", "keep", "review"):
+            obj = {"object_id": 2, "decision": decision, "area_cv": float("nan")}
+            with self.subTest(decision=decision):
+                with self.assertRaisesRegex(ValueError, "object 2.*no computable"):
+                    compute_qmask({"objects": [self.obj, obj]}, self.config)
 
     def test_nonfinite_components_are_ignored(self):
         bad = dict(self.obj, area_cv=float("nan"))
@@ -90,10 +96,11 @@ class QmaskTests(unittest.TestCase):
         obj = {"object_id": 1, "decision": "review", "reasons": "low_middle_coverage"}
         self.assertEqual(compute_qmask({"objects": [obj]}, self.config)["score"], 0)
 
-    def test_missing_evidence_warning(self):
-        result = compute_qmask({}, self.config)
+    def test_partial_evidence_is_measured_and_reports_missing_components(self):
+        result = compute_qmask({"objects": [{"object_id": 1, "middle_coverage": 1.0}]}, self.config)
         self.assertEqual(result["score"], 1)
-        self.assertIn("empty_mask_evidence_fallback", result["warnings"])
+        self.assertEqual(len(result["missing_components"]), 9)
+        self.assertIn("missing_components_ignored", result["warnings"])
 
     def test_config_validation_and_hash(self):
         config = copy.deepcopy(self.config)
@@ -105,6 +112,10 @@ class QmaskTests(unittest.TestCase):
         config = copy.deepcopy(self.config)
         config["flag_floor"] = .85
         with self.assertRaisesRegex(ValueError, "flag_floor is no longer supported"):
+            validate_mask_config(config)
+        config = copy.deepcopy(self.config)
+        config["flagged_missing_score"] = .85
+        with self.assertRaisesRegex(ValueError, "flagged_missing_score is no longer supported"):
             validate_mask_config(config)
 
     @staticmethod
@@ -171,10 +182,13 @@ class QmaskTests(unittest.TestCase):
             self.assertTrue(a["effective_for_score"])
             self.assertAlmostEqual(a["adjusted_score"], 100 * (1 - .5**.35))
             data["mask_qc"] = {}
-            a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
-            self.assertTrue(a["effective_for_score"])
-            self.assertEqual(a["adjusted_score"],100)
-            self.assertTrue(a["score_available"])
+            for policy in ("continuous", "penalty", "hard_fail"):
+                args.mask_policy = policy
+                with self.assertRaisesRegex(ValueError, "V001/result.json: Mask diagnostics missing"):
+                    scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
+            args.mask_policy = "ignore"
+            self.assertEqual(scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)["adjusted_score"], 100)
+            args.mask_policy = "continuous"
             data["mask_qc"] = {"objects": [{**{k:s["bad_value"] for k,s in self.config["components"].items()}, "object_id":1}]}
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertTrue(a["effective_for_score"])
@@ -183,6 +197,21 @@ class QmaskTests(unittest.TestCase):
             with patch.object(scorer, "mask_quality", side_effect=AssertionError("should not compute")):
                 a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
                 self.assertFalse(a["effective_for_score"])
+
+    def test_missing_diagnostics_stop_formal_report_generation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "velocity/V001/result.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({
+                "metric": "velocity", "prompt_id": "V001",
+                "tracking_quality": {"status": "pass"},
+                "physics_result": {"Status": "valid", "Relative_Error": 0},
+            }), encoding="utf-8")
+            args = parse_score_args(["--result-root", str(root), "--metadata", "none", "--no-plots"])
+            with self.assertRaisesRegex(ValueError, "V001/result.json: Mask diagnostics missing"):
+                scorer.run(args)
+            self.assertFalse((root / "score_reports/all_metrics/score_summary.json").exists())
 
     def test_metadata_keeps_eta_separate_from_acceleration(self):
         with tempfile.TemporaryDirectory() as raw:

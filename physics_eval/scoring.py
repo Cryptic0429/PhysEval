@@ -158,15 +158,18 @@ def mask_qc_status(result: dict[str, Any]) -> tuple[str, list[str], list[dict[st
 
 
 def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    qc_status, qc_reasons, objects = mask_qc_status(result)
     policy = "hard_fail" if args.strict_qc else args.mask_policy
     if policy == "ignore":
+        _, qc_reasons, _ = mask_qc_status(result)
         return {
             "status": "pass",
             "score": 1.0,
             "reasons": qc_reasons,
             "objects": [],
         }
+    config = getattr(args, "mask_config", None) or load_mask_config()
+    mask_info = compute_qmask(result.get("mask_qc") or {}, config)
+    qc_status, qc_reasons, objects = mask_qc_status(result)
     if policy == "penalty":
         score = 1.0 if qc_status == "pass" else float(args.qc_flag_multiplier)
         return {
@@ -184,8 +187,7 @@ def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, 
             "objects": [],
         }
 
-    config = getattr(args, "mask_config", None) or load_mask_config()
-    return compute_qmask(result.get("mask_qc") or {}, config)
+    return mask_info
 
 
 def tracking_path_from_result(result: dict[str, Any], result_path: Path) -> Path | None:
@@ -554,7 +556,10 @@ def score_data(
         rel = relative_error(physics)
         raw = base_score(rel, tau)
 
-        mask_info = mask_quality(result, args)
+        try:
+            mask_info = mask_quality(result, args)
+        except ValueError as exc:
+            raise ValueError(f"{path}: {exc}") from exc
         mask_status = str(mask_info.get("status") or "fail")
         mask_score = mask_info.get("score")
         qc_reasons = list(mask_info.get("reasons") or [])
@@ -700,12 +705,11 @@ def run(args: argparse.Namespace) -> None:
             "qc_flag_multiplier": 0.0 if effective_mask_policy == "hard_fail" else args.qc_flag_multiplier,
             "mask_score_thresholds": args.mask_config["components"],
             "mask_score_gamma": args.mask_config["gamma"],
-            "mask_flagged_missing_score": args.mask_config["flagged_missing_score"],
             "mask_aggregation": "minimum components, then minimum objects; flags do not raise component scores",
             "mask_missing_evidence": (
-                "ignore missing components; an object with no components receives one if unflagged, "
-                "otherwise mask_flagged_missing_score; without objects, flagged evidence receives zero "
-                "and unflagged evidence receives one"
+                "ignore missing individual components; require nonempty object diagnostics and at least "
+                "one computable component per object; otherwise stop scoring without a default score. "
+                "The explicit mask-policy ignore ablation bypasses mask scoring"
             ),
             "tracking_policy": args.tracking_policy,
             "quality_flag_multiplier": 0.0 if args.tracking_policy == "hard_fail" else args.quality_flag_multiplier,
