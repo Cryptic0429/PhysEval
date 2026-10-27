@@ -4,7 +4,8 @@ __pycache__/
 *.pyo
 
 # Local data and generated artifacts
-data/
+data/custom/
+data/metadata/
 batch_eval_results/
 runs/
 sam2_tracks/
@@ -18,11 +19,17 @@ repo/
 *.ckpt
 *.safetensors
 
-# Videos and masks
+# Generated videos and masks are ignored by default. Benchmark videos
+# under data/t2v_videos/ are tracked with Git LFS.
 *.mp4
 *.mov
 *.avi
 *.mkv
+!data/t2v_videos/
+!data/t2v_videos/**/*.mp4
+!data/t2v_videos/**/*.mov
+!data/t2v_videos/**/*.avi
+!data/t2v_videos/**/*.mkv
 
 # LaTeX build outputs
 *.aux
