@@ -13,6 +13,7 @@ from .io.metadata import read_metadata, row_to_dict
 from .io.results import failure_result, write_results
 from .io.tracks import normalize_tracking_json, resolve_tracking_json
 from .reporting import save_diagnostics
+from .tasks import resolve_task_fields
 
 LOGGER = logging.getLogger("physics_eval")
 
@@ -33,6 +34,7 @@ def process_row(
     save_diag: bool,
     strict: bool,
 ) -> dict[str, Any]:
+    row = resolve_task_fields(row)
     evaluator_name = str(row.get("Evaluator") or "")
     evaluator = EVALUATOR_REGISTRY.get(evaluator_name)
     if evaluator is None:

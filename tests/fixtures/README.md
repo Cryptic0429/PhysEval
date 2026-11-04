@@ -15,3 +15,8 @@ frozen source. Production now rejects empty object evidence or an object with
 no computable components; separate contract tests cover those errors instead
 of replaying the fixture's historical missing-evidence defaults. The fixture
 itself is not rewritten and is not a selectable production scoring mode.
+
+`legacy_metadata.csv` freezes the first unmodified row for each of the ten tasks
+from the 20-column benchmark release at commit `133153c`. Compatibility tests
+use these independent records to check omitted-field restoration, numerical
+estimation, scoring and explicit legacy overrides after the 18-column migration.

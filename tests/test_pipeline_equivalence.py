@@ -90,7 +90,8 @@ def _write_saved_tracking(workspace, output, prompt, *, static, flat):
 
 
 @pytest.mark.parametrize("flat", [False, True])
-def test_eval_only_preserves_measurements_failure_rows_and_reports(tmp_path, monkeypatch, flat):
+@pytest.mark.parametrize("compact_metadata", [False, True])
+def test_eval_only_preserves_measurements_failure_rows_and_reports(tmp_path, monkeypatch, flat, compact_metadata):
     metadata = tmp_path / "metadata.xlsx"
     output = tmp_path / "batch_eval_results"
     rows = []
@@ -105,7 +106,10 @@ def test_eval_only_preserves_measurements_failure_rows_and_reports(tmp_path, mon
         ))
         if case != "missing":
             _write_saved_tracking(tmp_path, output, prompt, static=case == "static", flat=flat)
-    pd.DataFrame(rows).to_excel(metadata, index=False)
+    table = pd.DataFrame(rows)
+    if compact_metadata:
+        table = table.drop(columns=["Evaluator", "Measurement_Method"])
+    table.to_excel(metadata, index=False)
     args = parse_eval_args([
         "--workspace-root", str(tmp_path), "--metadata", str(metadata),
         "--eval-only", "--no-plots", "--output-layout", "flat" if flat else "organized",
@@ -116,6 +120,8 @@ def test_eval_only_preserves_measurements_failure_rows_and_reports(tmp_path, mon
     pipeline.run(args)
 
     results = json.loads((output / "results.json").read_text())
+    assert all(row["Evaluator"] == "eval_velocity" for row in results)
+    assert all(row["Measurement_Method"] == "linear_fit" for row in results)
     assert [row["Prompt_ID"] for row in results] == ["V001", "V002", "V003"]
     assert [row["Status"] for row in results] == ["valid", "failed", "valid"]
     assert results[0]["Measured_Value"] == pytest.approx(.26586807763582726)

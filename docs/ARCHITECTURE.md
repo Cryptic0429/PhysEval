@@ -29,6 +29,7 @@ Video generation remains external. Validation, analysis and tests are separate w
 | Public boundary | physics_eval/cli.py, config.py | Command parsing, validated defaults and paths; fixed formal initialization policy |
 | Formal workflow | physics_eval/pipeline.py | Iterate samples, run the tracking worker, collect diagnostics and estimates, preserve failure records |
 | Data interfaces | physics_eval/schemas.py, io/ | Prompt records, metadata, normalized tracks, result artifacts and reports |
+| Task defaults | physics_eval/tasks.py | Restore omitted evaluator and method fields from the physical metric while preserving explicit legacy values |
 | Initialization | physics_eval/tracking/initialization.py, policy.py, motion.py, yolo.py | Automatic/manual/renderer_gt prompts, detection candidates, fallback and provenance |
 | Tracking | physics_eval/tracking/sam2.py, video.py, output.py | Shared inference, frame extraction and per-frame track/mask records |
 | Internal execution | physics_eval/tracking/worker.py | Isolated inference subprocess boundary; explicit prompt manifest rather than callback replacement |
@@ -50,7 +51,7 @@ Manual and explicitly enabled renderer_gt prompts bypass automatic detection. Re
 
 ## Data flow and preserved outputs
 
-1. Metadata supplies target values, units, evaluator keys, object counts, calibration and known parameters.
+1. Metadata supplies scene setup, physical targets and scale calibration. Task definitions restore omitted evaluator/method fields before the existing workflow; explicit legacy fields take precedence.
 2. Initial prompts specify object ID, frame, foreground points and optional negative points/box.
 3. The tracker writes centers, boxes, areas, masks and initialization evidence.
 4. Formal evaluation records tracking gates, mask evidence, physical measurements and validity.

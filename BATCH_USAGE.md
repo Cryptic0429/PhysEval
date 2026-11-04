@@ -210,7 +210,7 @@ python physeval.py eval --no-plots
 
 ## Metadata Requirements
 
-The metadata Excel must contain the required columns checked by `physics_eval/io/metadata.py`, including:
+The metadata Excel must contain these input columns checked by `physics_eval/io/metadata.py`:
 
 ```text
 Index
@@ -219,14 +219,19 @@ Video_File
 Tracking_JSON
 Module
 Metric
-Evaluator
-Measurement_Method
 Scale_Mode
 Target_Type
 Target_Value
 Target_Unit
 Known_Parameters_JSON
 ```
+
+For the ten benchmark metrics, omitted `Evaluator` and `Measurement_Method`
+columns are restored from `physics_eval/tasks.py` before evaluation. Legacy
+tables may still supply them explicitly; their values retain precedence,
+including blank values. Execution and result fields are unchanged. The released
+18-column table groups the remaining inputs into Scene Setup, Physical Target
+and Scale Calibration. See the [field guide](benchmark/metadata/README.md).
 
 For videos under `data/t2v_videos`, `Video_File` can be a relative path such as:
 

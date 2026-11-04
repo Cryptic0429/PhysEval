@@ -8,11 +8,19 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from ..tasks import TASK_DEFINITIONS, resolve_task_fields
 from .video import discover_videos
 from .reports import json_safe
 
 def read_metadata(path: str | Path) -> pd.DataFrame:
     df = pd.read_excel(path)
+    # Preserve the existing frame and dtypes; restore only omitted columns.
+    if "Metric" in df.columns:
+        for column, attribute in (("Evaluator", "evaluator"), ("Measurement_Method", "measurement_method")):
+            if column not in df.columns:
+                df[column] = df["Metric"].map(
+                    lambda metric: getattr(TASK_DEFINITIONS.get(str(metric)), attribute, None)
+                )
     required = [
         "Index",
         "Prompt_ID",
@@ -93,7 +101,7 @@ def load_metadata(path: Path | None, video_root: Path) -> list[dict[str, Any]]:
         sheet = "metadata" if "metadata" in workbook.sheet_names else workbook.sheet_names[0]
         table = pd.read_excel(path, sheet_name=sheet)
     table = table.where(pd.notna(table), None)
-    return [json_safe(row) for row in table.to_dict(orient="records")]
+    return [resolve_task_fields(json_safe(row)) for row in table.to_dict(orient="records")]
 
 
 def filter_rows(

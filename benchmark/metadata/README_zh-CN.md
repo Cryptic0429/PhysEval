@@ -9,7 +9,7 @@
 ## 文件
 
 - `phys_t2v_bench_prompts.xlsx`：原始 Excel 提示词工作簿。
-- `phys_t2v_bench_metadata.xlsx`：原始 Excel 评测元数据工作簿。
+- `phys_t2v_bench_metadata.xlsx`：精简后的 Excel 评测元数据工作簿，500 行、18 列。
 - `csv/`：两个工作簿中每个工作表的 UTF-8 CSV 导出文件，便于检查、版本管理以及不依赖 Excel 的工作流程。
 
 ## 数据集规模
@@ -70,23 +70,27 @@
 - `summary`：各模块的指标数量。
 - `field_guide`：字段说明。
 
-`metadata` 中的主要列：
+`metadata` 按样本标识和三类任务信息排列，单行表头与原字段名保持可供程序读取：
 
-- `Index`、`Prompt_ID`：与提示词工作簿匹配的键。
-- `Video_File`：预期生成的视频文件名。
-- `Tracking_JSON`：相对于跟踪结果根目录的预期跟踪 JSON 路径。
-- `Module`、`Metric`、`Evaluator`、`Measurement_Method`：评估器选择。
-- `Tracking_Objects`、`Num_Objects`、`View`、`Motion_Axis`：跟踪及视角假设。
-- `Scale_Mode`、`Calibration_Object`、`Calibration_Dimension`、`Calibration_Value_m`：尺度标定。
-- `Target_Type`、`Target_Value`、`Target_Unit`：物理目标定义。
-- `Known_Parameters_JSON`：以 JSON 编码的辅助物理参数。
+| 分组 | 字段 |
+|---|---|
+| 样本标识 | `Index`、`Prompt_ID`、`Video_File`、`Tracking_JSON`、`Module` |
+| 场景设置 Scene Setup | `Tracking_Objects`、`Num_Objects`、`View`、`Motion_Axis`、`Known_Parameters_JSON` |
+| 物理目标 Physical Target | `Metric`、`Target_Type`、`Target_Value`、`Target_Unit` |
+| 尺度标定 Scale Calibration | `Scale_Mode`、`Calibration_Object`、`Calibration_Dimension`、`Calibration_Value_m` |
 
-该模式将自然语言生成要求与评测指令分离。具体而言：
+`Metric` 对应的评估函数和测量方法由 [任务定义](../../physics_eval/tasks.py) 提供，主表省去重复的 `Evaluator`、`Measurement_Method` 两列。加载时恢复这两个内部字段，结果文件继续记录它们。旧版 20 列表仍可使用，显式填写的字段（包括空值和自定义值）保持原行为；只有省略的列使用默认值。精简表需搭配新版代码，旧代码可继续使用旧版表。
+
+场景设置是字段分组，不是将数值合并为一段文本。元数据保留评测所需的场景信息，并非完整保存提示词中的颜色、背景等所有描述。具体而言：
 
 - `Num_Objects` 属于跟踪质量硬门限；动量任务需要两条持续存在的轨迹，其他当前任务预期一个物体。
 - `Scale_Mode` 表明是否用已知尺寸物体提供米/像素标定，或评估器是否采用空间尺度会相消的纯比值/纯周期物理量。
-- `Known_Parameters_JSON` 存储特定物理评估器计算所需的已知辅助参数（如质量、流体密度或物体半径）。
+- `Known_Parameters_JSON` 保留已知物理参数、场景条件和已有生成约束，键名和值均不变。
 - `Target_Value` 和 `Target_Unit` 定义用于计算相对误差、可审计的数值目标。
+
+需要空间标定时，提示词中的标准物体或明确尺寸应与元数据中的标定依据对应。比值和周期任务仍遵循原有规则。目标参考值不一定显式写入提示词，例如地球重力任务仍不写入数值 g。
+
+字段精简不改变提示词、物理估计、跟踪、质量门控或评分规则。新旧区别与验证范围见 [兼容性说明](../../docs/METADATA_COMPATIBILITY.md)。
 
 ## 使用方法
 

@@ -10,7 +10,7 @@ The dataset is structured so that each generated video is evaluated against one 
 ## Files
 
 - `phys_t2v_bench_prompts.xlsx`: original Excel prompt workbook.
-- `phys_t2v_bench_metadata.xlsx`: original Excel evaluation metadata workbook.
+- `phys_t2v_bench_metadata.xlsx`: compact evaluation metadata workbook with 500 rows and 18 columns.
 - `csv/`: UTF-8 CSV exports of every worksheet in the two workbooks, provided for
   easier inspection, versioning, and non-Excel workflows.
 
@@ -73,23 +73,27 @@ Main columns in `All_Prompts`:
 - `summary`: per-module metric counts.
 - `field_guide`: field descriptions.
 
-Main columns in `metadata`:
+The flat table keeps a single header row and groups its existing fields as follows:
 
-- `Index`, `Prompt_ID`: keys that match the prompt workbook.
-- `Video_File`: expected generated video filename.
-- `Tracking_JSON`: expected tracking JSON path relative to a tracking root.
-- `Module`, `Metric`, `Evaluator`, `Measurement_Method`: evaluator selection.
-- `Tracking_Objects`, `Num_Objects`, `View`, `Motion_Axis`: tracking and view assumptions.
-- `Scale_Mode`, `Calibration_Object`, `Calibration_Dimension`, `Calibration_Value_m`: scale calibration.
-- `Target_Type`, `Target_Value`, `Target_Unit`: physical target specification.
-- `Known_Parameters_JSON`: JSON-encoded auxiliary physical parameters.
+| Group | Fields |
+|---|---|
+| Sample | `Index`, `Prompt_ID`, `Video_File`, `Tracking_JSON`, `Module` |
+| Scene Setup | `Tracking_Objects`, `Num_Objects`, `View`, `Motion_Axis`, `Known_Parameters_JSON` |
+| Physical Target | `Metric`, `Target_Type`, `Target_Value`, `Target_Unit` |
+| Scale Calibration | `Scale_Mode`, `Calibration_Object`, `Calibration_Dimension`, `Calibration_Value_m` |
 
-The schema separates natural-language generation from evaluation instructions. In particular:
+[Task definitions](../../physics_eval/tasks.py) supply the evaluator and measurement method for each `Metric`. The input table omits the repeated `Evaluator` and `Measurement_Method` columns. Loaders restore these internal fields, and result files still record them. Legacy 20-column inputs remain supported: explicit values, including blanks and custom values, keep their original behavior. Only omitted columns receive defaults. Compact inputs require the updated code; older code can continue using the legacy table.
+
+Scene Setup groups structured fields rather than replacing numerical inputs with prose. Metadata retains the scene information needed for evaluation, not every visual detail in the prompt. In particular:
 
 - `Num_Objects` is part of the hard tracking-quality gate; momentum requires two persistent tracks while the other current tasks expect one.
 - `Scale_Mode` indicates whether a known-size object provides meters-per-pixel calibration or whether the evaluator uses a ratio-only / period-only quantity for which spatial scale cancels.
-- `Known_Parameters_JSON` provides auxiliary physical constants and object parameters (such as mass, fluid density, or reference dimensions) required by specific inverse evaluators.
+- `Known_Parameters_JSON` retains known physical inputs, scene conditions and existing generation constraints without changing their keys or values.
 - `Target_Value` and `Target_Unit` define the auditable numerical quantity used to compute relative error.
+
+When spatial calibration is required, the standard object or explicit dimensions in the prompt should match the metadata reference. Ratio and period tasks retain their existing rules. Reference values need not all appear numerically in the prompt: Earth-gravity prompts still omit numeric g.
+
+This schema change preserves prompts, estimation, tracking, quality gates and scoring. See the [compatibility notes](../../docs/METADATA_COMPATIBILITY.md) for the before/after comparison and verification scope.
 
 ## How to Use
 
