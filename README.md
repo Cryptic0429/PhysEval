@@ -5,7 +5,7 @@
 [English](README.md) | [简体中文](README_zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Paper](https://img.shields.io/badge/Paper-PDF-b31b1b.svg)](docs/PhysEval.pdf)
+[![Paper](https://img.shields.io/badge/Paper-PDF-b31b1b.svg)](https://raw.githubusercontent.com/Cryptic0429/PhysEval/main/docs/PhysEval.pdf)
 ![visitors](https://visitor-badge.laobi.icu/badge?page_id=Cryptic0429.PhysEval&left_color=gray&right_color=blue)
 
 PhysEval measures how closely generated videos follow quantitative physical constraints. It pairs **500 prompts across 10 physical metrics** with an automatic pipeline that tracks objects, estimates physical quantities, and compares them with the targets specified in the benchmark.
