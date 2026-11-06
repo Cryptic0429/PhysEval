@@ -5,6 +5,8 @@
 [English](README.md) | [简体中文](README_zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Paper](https://img.shields.io/badge/Paper-PDF-b31b1b.svg)](docs/PhysEval.pdf)
+![visitors](https://visitor-badge.laobi.icu/badge?page_id=Cryptic0429.PhysEval&left_color=gray&right_color=blue)
 
 PhysEval 用于衡量生成视频对定量物理约束的遵循程度。项目提供覆盖 **10 项物理指标的 500 组提示词与元数据**，通过自动跟踪、物理量估计和目标值比较，评测文生视频模型的物理准确性。
 
@@ -222,7 +224,7 @@ PhysEval/
 ├── configs/scoring/              # 掩膜质量评分配置
 ├── requirements*.txt             # 核心与测试依赖
 ├── LICENSE                       # MIT 协议
-└── docs/ARCHITECTURE.md           # 模块职责与工作流程
+└── docs/                          # 架构说明与论文 PDF
 ```
 
 [代码架构说明](docs/ARCHITECTURE.md)描述完整工作流程与模块职责。实验与验证通过独立命令运行，`eval` 不会自动执行这些步骤。

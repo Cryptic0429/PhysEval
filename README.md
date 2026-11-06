@@ -5,6 +5,8 @@
 [English](README.md) | [简体中文](README_zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Paper](https://img.shields.io/badge/Paper-PDF-b31b1b.svg)](docs/PhysEval.pdf)
+![visitors](https://visitor-badge.laobi.icu/badge?page_id=Cryptic0429.PhysEval&left_color=gray&right_color=blue)
 
 PhysEval measures how closely generated videos follow quantitative physical constraints. It pairs **500 prompts across 10 physical metrics** with an automatic pipeline that tracks objects, estimates physical quantities, and compares them with the targets specified in the benchmark.
 
@@ -222,7 +224,7 @@ PhysEval/
 ├── configs/scoring/              # Mask-quality scoring configuration
 ├── requirements*.txt             # Core and test dependencies
 ├── LICENSE                       # MIT license
-└── docs/ARCHITECTURE.md           # Module responsibilities and workflow
+└── docs/                          # Architecture guide and the paper PDF
 ```
 
 The [architecture guide](docs/ARCHITECTURE.md) describes the complete workflow and module responsibilities. Experimental and validation commands are explicit; `eval` does not run them automatically.
