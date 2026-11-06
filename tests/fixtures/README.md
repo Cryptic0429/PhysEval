@@ -1,22 +1,7 @@
-`reference_score.py` freezes the scorer downloaded from the supplied anonymous
-PhysEval repository. Its original SHA-256 is
-`c458b99a97a335e1504b4f599ac10ee89928a8268d7b0e79c97bffe8155ec7a8`.
-Only the tracking-quality import path is adapted to the current package layout;
-the tracking-quality implementation itself is unchanged. The regression suite
-checks this provenance hash. This historical source retains its original
-flagged-score floor; production scoring no longer applies that floor.
+# Test fixtures
 
-For current per-video, aggregate and CLI comparisons, the tests load an isolated
-copy of the historical module and explicitly replace only its object-score
-aggregation: when components are available, use their minimum without an uplift.
-These replay inputs provide computable object diagnostics. The independent
-component calculations, gates and model aggregation remain supplied by the
-frozen source. Production now rejects empty object evidence or an object with
-no computable components; separate contract tests cover those errors instead
-of replaying the fixture's historical missing-evidence defaults. The fixture
-itself is not rewritten and is not a selectable production scoring mode.
+`reference_score.py` provides a reference scoring implementation for regression comparisons. Its tracking-quality import path is adapted to the current package layout.
 
-`legacy_metadata.csv` freezes the first unmodified row for each of the ten tasks
-from the 20-column benchmark release at commit `133153c`. Compatibility tests
-use these independent records to check omitted-field restoration, numerical
-estimation, scoring and explicit legacy overrides after the 18-column migration.
+For per-video, aggregate, and CLI comparisons, the tests explicitly set the reference object's score aggregation to the minimum available component score and use inputs with computable object diagnostics. Component calculations, tracking and validity gates, and model aggregation otherwise come from the reference implementation. Separate contract tests cover empty object evidence and objects with no computable components.
+
+`legacy_metadata.csv` contains one explicit 20-column metadata row for each of the ten benchmark tasks. Compatibility tests use these records to check omitted-field restoration, numerical estimation, scoring, and explicit overrides of `Evaluator` and `Measurement_Method`.

@@ -2,7 +2,7 @@
 
 [Project README](README.md) | [中文项目说明](README_zh-CN.md) | [Architecture](docs/ARCHITECTURE.md)
 
-This guide covers the executable pipeline behind the evaluation protocol described in the PhysEval paper: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
+This guide covers the PhysEval evaluation pipeline: object initialization, SAM2 mask propagation, tracking-quality gates, task-specific inverse-physics estimation, and compact per-video records.
 
 The batch stage performs tracking and estimates physical quantities for each video. Model-level scoring applies eligibility gates and aggregates results in a separate step.
 
@@ -95,6 +95,8 @@ See [SCORING_USAGE.md](SCORING_USAGE.md) for detailed scoring options.
 
 ## Common Commands
 
+The examples below pass the released workbook explicitly. Omit `--metadata` only when your local workspace contains exactly one `data/metadata/*.xlsx` file.
+
 Run all rows in the metadata:
 
 ```bash
@@ -104,55 +106,73 @@ python physeval.py eval --metadata benchmark/metadata/phys_t2v_bench_metadata.xl
 Run one row by `Index`:
 
 ```bash
-python physeval.py eval --index 1
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --index 1
 ```
 
 Run one row by `Prompt_ID`:
 
 ```bash
-python physeval.py eval --prompt-id F001
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --prompt-id F001
 ```
 
 Reuse existing tracking outputs when possible:
 
 ```bash
-python physeval.py eval --reuse-tracking
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --reuse-tracking
 ```
 
 Evaluate existing tracking only, without running SAM2:
 
 ```bash
-python physeval.py eval --eval-only
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --eval-only
 ```
 
 Track only, without physics evaluation:
 
 ```bash
-python physeval.py eval --tracking-only
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --tracking-only
 ```
 
 Save SAM2 visualization videos:
 
 ```bash
-python physeval.py eval --vis
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --vis
 ```
 
 Write extra debug CSV files and diagnostic plots:
 
 ```bash
-python physeval.py eval --diagnostics
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --diagnostics
 ```
 
 Adjust the static-object quality gate:
 
 ```bash
-python physeval.py eval --min-motion-extent-ratio 1.0
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --min-motion-extent-ratio 1.0
 ```
 
 Adjust how many frames an object must appear in to count:
 
 ```bash
-python physeval.py eval --min-object-coverage 0.6
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --min-object-coverage 0.6
 ```
 
 ## Fixed Initialization Protocol
@@ -176,7 +196,9 @@ The adopted source is saved as `auto_yolo` or `auto_motion` in `tracking_points.
 Use a specific YOLO weights file when required by a declared experimental setup:
 
 ```bash
-python physeval.py eval --yolo-weights yolov8n.pt
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --yolo-weights yolov8n.pt
 ```
 
 Manual prompt metadata is also supported. Renderer ground-truth initialization requires the explicit `--allow-renderer-gt-init` flag for controlled experiments. Reusing tracks or estimating from existing tracks does not rerun initialization.
@@ -193,19 +215,25 @@ batch_eval_results/<metric>/<prompt_id>/plots/obj_000001_mask_area.png
 If a mask QC issue is found, the default action is warning only. The physics evaluator still runs:
 
 ```bash
-python physeval.py eval --area-action warn
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --area-action warn
 ```
 
 To skip physics evaluation for videos flagged by mask QC:
 
 ```bash
-python physeval.py eval --area-action skip
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --area-action skip
 ```
 
 Disable mask QC plots:
 
 ```bash
-python physeval.py eval --no-plots
+python physeval.py eval \
+  --metadata benchmark/metadata/phys_t2v_bench_metadata.xlsx \
+  --no-plots
 ```
 
 ## Metadata Requirements

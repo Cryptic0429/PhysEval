@@ -12,10 +12,11 @@ def eval_velocity(tracking_df, metadata_row):
         require_min_frames(track, 4)
         scale = require_scale(metadata_row, track)
         t = track["t"].to_numpy(float)
-        s, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "auto"), scale.scale_m_per_px)
-        v, intercept, r2, _ = linear_fit(t, s)
-        measured = abs(v)
+        q, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "auto"))
+        v_px, intercept_px, r2, _ = linear_fit(t, q)
         status, reason = status_from_r2(r2)
+        measured = abs(v_px) * scale.scale_m_per_px
+        intercept = intercept_px * scale.scale_m_per_px
         return done(
             metadata_row,
             measured,

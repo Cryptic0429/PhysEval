@@ -68,7 +68,7 @@ bash tools/setup_assets.sh --install-sam2
 | 文件 | 内容 |
 | --- | --- |
 | [`phys_t2v_bench_prompts.xlsx`](benchmark/metadata/phys_t2v_bench_prompts.xlsx) | `All_Prompts` 工作表中的视频生成提示词 |
-| [`phys_t2v_bench_metadata.xlsx`](benchmark/metadata/phys_t2v_bench_metadata.xlsx) | `metadata` 工作表中的目标值、单位、评估器设置、物体数和尺度信息 |
+| [`phys_t2v_bench_metadata.xlsx`](benchmark/metadata/phys_t2v_bench_metadata.xlsx) | `metadata` 工作表中的场景设置、物理目标和尺度标定信息 |
 | [`csv/`](benchmark/metadata/csv/) | 所有工作表的 UTF-8 CSV 导出 |
 
 每项指标包含 **50 条样本**，合计 **500 条**：
@@ -136,7 +136,7 @@ python physeval.py eval \
 
 ### 3. 汇总评分
 
-完整评测结束后，按照当前实现的 PhysEval 评分规则汇总结果：
+完整评测结束后，按照 PhysEval 评分规则汇总结果：
 
 ```bash
 python physeval.py score \
@@ -162,7 +162,7 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 
 `tau` 是各指标对应的误差容忍度。通过跟踪检查的质量系数为 `1`；估计有效性系数在 `valid` 时为 `1`，在 `weak_valid` 时为 `0.8`。
 
-**掩膜质量评分 Q_mask**使用包括归一化质心跳步在内的十项诊断，将阈值归一化的劣化程度 `p` 映射为 `1 - p^0.35`，在分量与对象间取最小值聚合。异常标记不改变已有分量分值；单项缺失分量被忽略，而有效中段帧不足等明确诊断出的失败贡献零分。评测样本必须保留有效的对象级掩膜诊断，缺失时程序报错提示重新生成而非赋予兜底分。Q_mask 作为乘数调整最终得分，不单独改变有效资格。
+**掩膜质量评分 Q_mask**使用包括归一化质心跳步在内的十项诊断，将阈值归一化的劣化程度 `p` 映射为 `1 - p^0.35`，在分量与对象间取最小值聚合。异常标记不改变已有分量分值；单项缺失分量被忽略，而有效中段帧不足等明确诊断出的失败贡献零分。评测样本必须保留有效的对象级掩膜诊断；缺失时评分停止，并提示重新运行 `eval`。Q_mask 作为乘数调整最终得分，不单独改变有效资格。
 
 | 报告量 | 含义 |
 | --- | --- |
@@ -170,7 +170,7 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 | **剔除率** | 未通过跟踪质量、物理估计有效性或两项检查的视频比例。 |
 | **端到端得分** | 以全部视频为分母、给剔除视频记零分的补充结果。 |
 
-评分先在各指标内汇总，模型总分再对各指标等权平均。基准样本标识不完整、有效物理估计缺少可计算误差，或缺少所需对象掩膜诊断时，程序会停止正式汇总。显式使用 `--mask-policy ignore` 的消融实验会跳过掩膜评分。
+评分先在各指标内汇总，模型总分再对各指标等权平均。基准样本标识不完整、有效物理估计缺少可计算误差，或缺少所需对象掩膜诊断时，程序会停止正式汇总。
 
 报告保存于 `batch_eval_results/my_model/score_reports/all_metrics/`：
 
@@ -188,7 +188,7 @@ PhysEval 分别衡量**可测量性**与**物理准确性**。视频只有通过
 
 | 参数 | 默认值 | 用途 |
 | --- | --- | --- |
-| `--metadata` | 从 `data/metadata/` 自动查找 | 评测发布基准时，应像上文一样显式传入工作簿。 |
+| `--metadata` | 自动查找本地工作区中唯一的 `data/metadata/*.xlsx` | 使用发布基准时，显式传入 `benchmark/metadata/phys_t2v_bench_metadata.xlsx`。 |
 | `--prompt-id` | 全部行 | 选择单条提示词进行流程检查。 |
 | `--reuse-tracking` | 关闭 | 存在跟踪 JSON 时复用。 |
 | `--eval-only` | 关闭 | 仅根据已有跟踪 JSON 估计物理量。 |
@@ -219,7 +219,7 @@ PhysEval/
 ├── tests/                        # 单元、合成对照和集成检查
 ├── assets/                       # README 使用的论文配图
 ├── benchmark/metadata/           # 发布的工作簿与 CSV
-├── configs/scoring/              # Q_mask 评分规则配置
+├── configs/scoring/              # 掩膜质量评分配置
 ├── requirements*.txt             # 核心与测试依赖
 ├── LICENSE                       # MIT 协议
 └── docs/ARCHITECTURE.md           # 模块职责与工作流程

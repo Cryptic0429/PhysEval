@@ -1,6 +1,7 @@
 """Independent reference replay, saved-evidence sensitivity and mask controls."""
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import importlib.util
@@ -104,20 +105,23 @@ def _write_results(root: Path, count=256) -> list[Path]:
     return paths
 
 
-@pytest.mark.parametrize("mask_policy", ["continuous", "penalty", "hard_fail", "ignore"])
 @pytest.mark.parametrize("tracking_policy", ["hard_fail", "penalty", "ignore"])
-def test_scores_and_aggregates_match_reference_without_positive_floor(tmp_path, mask_policy, tracking_policy):
+def test_scores_and_aggregates_match_reference_without_positive_floor(tmp_path, tracking_policy):
     paths = _write_results(tmp_path)
     args = parse_score_args([
         "--metadata", "none", "--result-root", str(tmp_path), "--no-plots",
-        "--mask-policy", mask_policy, "--tracking-policy", tracking_policy,
+        "--tracking-policy", tracking_policy,
         "--quality-flag-multiplier", "0.4",
     ])
     reference = reference_scorer()
+    reference_args = argparse.Namespace(**vars(args))
+    reference_args.mask_policy = "continuous"
+    reference_args.strict_qc = False
+    reference_args.qc_flag_multiplier = 0.7
     current_rows, reference_rows = [], []
     for path in paths:
         current = scoring.score_one(path, scoring.DEFAULT_TOLERANCES, args)
-        expected = reference.score_one(path, reference.DEFAULT_TOLERANCES, args)
+        expected = reference.score_one(path, reference.DEFAULT_TOLERANCES, reference_args)
         for key in current.keys() & expected.keys():
             assert current[key] == expected[key], (path, key)
         current_rows.append(current)

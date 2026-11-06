@@ -1,6 +1,6 @@
 # Scoring Batch Results
 
-This guide explains how PhysEval turns per-video `result.json` files into model and metric scores. For the complete evaluation workflow, see [BATCH_USAGE.md](BATCH_USAGE.md).
+This guide explains how PhysEval turns per-video `result.json` files into model and metric scores. Run the commands from the repository root. For the complete evaluation workflow, see [BATCH_USAGE.md](BATCH_USAGE.md).
 
 ## Run the scorer
 
@@ -12,7 +12,7 @@ python physeval.py score \
   --model-name my_model
 ```
 
-The default `weak_valid` weight is **0.8**, matching the paper. It does not need to be passed explicitly for ordinary scoring.
+The default `weak_valid` weight is **0.8**. It does not need to be passed explicitly for ordinary scoring.
 
 Useful options:
 
@@ -32,7 +32,7 @@ PhysEval uses one mask-quality scoring rule, configured in `configs/scoring/mask
 
 The scorer applies checks in order:
 
-1. **Tracking quality:** the expected object count, object coverage and meaningful motion must pass. The paper requires an object to be tracked in at least half the frames, and the primary object's motion to span at least 0.75 of its median diameter. A failed tracking check excludes the video.
+1. **Tracking quality:** the expected object count, object coverage and meaningful motion must pass. By default, an object must be tracked in at least half the frames, and the primary object's motion must span at least 0.75 of its median diameter. A failed tracking check excludes the video.
 2. **Physics validity:** the evaluator must return `valid` or `weak_valid`. `invalid` and `failed` videos are excluded.
 3. **Mask quality:** after both hard checks pass, mask evidence supplies a continuous multiplier in `[0, 1]`. A low measured value reduces the score but does not itself exclude the video.
 
@@ -101,6 +101,6 @@ python physeval.py analyze-sensitivity \
   --output-dir runs/scoring_sensitivity
 ```
 
-Sensitivity analysis runs on saved results to test robustness across gamma, validity weights, and fit thresholds.
+Sensitivity analysis runs on saved results to test robustness across the mask-score exponent (gamma), validity weights, and fit thresholds.
 
 See [Architecture](docs/ARCHITECTURE.md) for the separation between formal scoring, experimental analyses, and validation. Formal `eval` uses the fixed YOLO-then-motion initialization protocol described in [BATCH_USAGE.md](BATCH_USAGE.md).

@@ -17,15 +17,15 @@ def eval_friction(tracking_df, metadata_row):
             raise ValueError("motion_not_1d")
         scale = require_scale(metadata_row, track)
         t = track["t"].to_numpy(float)
-        s, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "x"), scale.scale_m_per_px)
-        a2, b, c, r2, _ = quadratic_fit(t, s)
-        acc = 2.0 * a2
-        mu = abs(acc) / max(abs(g_from_params(metadata_row)), 1e-12)
-        v = central_velocity(t, s)
-        speed_drop = abs(v[-1]) < abs(v[0]) if len(v) >= 2 else False
+        q, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "x"))
+        a2_px, b_px, c_px, r2, _ = quadratic_fit(t, q)
+        v_px = central_velocity(t, q)
+        speed_drop = abs(v_px[-1]) < abs(v_px[0]) if len(v_px) >= 2 else False
         status, reason = status_from_r2(r2)
         if not speed_drop and status == "valid":
             status, reason = "weak_valid", "velocity_not_decreasing"
+        acc = 2.0 * a2_px * scale.scale_m_per_px
+        mu = abs(acc) / max(abs(g_from_params(metadata_row)), 1e-12)
         return done(
             metadata_row,
             mu,

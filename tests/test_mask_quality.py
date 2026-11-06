@@ -182,13 +182,8 @@ class QmaskTests(unittest.TestCase):
             self.assertTrue(a["effective_for_score"])
             self.assertAlmostEqual(a["adjusted_score"], 100 * (1 - .5**.35))
             data["mask_qc"] = {}
-            for policy in ("continuous", "penalty", "hard_fail"):
-                args.mask_policy = policy
-                with self.assertRaisesRegex(ValueError, "V001/result.json: Mask diagnostics missing"):
-                    scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
-            args.mask_policy = "ignore"
-            self.assertEqual(scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)["adjusted_score"], 100)
-            args.mask_policy = "continuous"
+            with self.assertRaisesRegex(ValueError, "V001/result.json: Mask diagnostics missing"):
+                scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             data["mask_qc"] = {"objects": [{**{k:s["bad_value"] for k,s in self.config["components"].items()}, "object_id":1}]}
             a = scorer.score_one(Path("velocity/V001/result.json"), scorer.DEFAULT_TOLERANCES, args)
             self.assertTrue(a["effective_for_score"])

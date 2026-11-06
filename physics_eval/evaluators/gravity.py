@@ -17,11 +17,12 @@ def eval_gravity(tracking_df, metadata_row):
         if scale_value is None:
             scale_value = 1.0
         t = track["t"].to_numpy(float)
-        s, axis_used = project_motion(track, "y", scale_value, y_down_positive=True)
-        a2, b, c, r2, _ = quadratic_fit(t, s)
+        q, axis_used = project_motion(track, "y", y_down_positive=True)
+        a2_px, b_px, c_px, r2, _ = quadratic_fit(t, q)
+        status, reason = status_from_r2(r2)
+        a2, b, c = (value * scale_value for value in (a2_px, b_px, c_px))
         measured = abs(2.0 * a2)
         ref_g = g_from_params(metadata_row, default=9.8)
-        status, reason = status_from_r2(r2)
         if ref_g == 0 and measured < 0.2:
             status, reason = "valid", ""
         return done(

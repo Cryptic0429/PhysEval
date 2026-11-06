@@ -34,7 +34,7 @@ Video generation remains external. Validation, analysis and tests are separate w
 | Tracking | physics_eval/tracking/sam2.py, video.py, output.py | Shared inference, frame extraction and per-frame track/mask records |
 | Internal execution | physics_eval/tracking/worker.py | Isolated inference subprocess boundary; explicit prompt manifest rather than callback replacement |
 | Estimation | physics_eval/estimation.py, calibration.py, evaluators/, math/ | Ten registered physical tasks, scale recovery, fits, geometry and time alignment |
-| Reliability | physics_eval/quality/ | Tracking gate, estimation checks, mask evidence, mask-quality configuration and minimum aggregation and saved-mask inspection |
+| Reliability | physics_eval/quality/ | Tracking gates, estimation checks, mask evidence, configurable minimum-aggregation mask scoring, and saved-mask inspection |
 | Scoring | physics_eval/scoring.py | Eligibility, physical error scoring, quality weighting, completeness and aggregate statistics |
 | Presentation | physics_eval/reporting.py | Diagnostic/trajectory plots, score plots and report writers |
 | Research | experiments/ | Saved-evidence parameter sensitivity |
@@ -49,9 +49,9 @@ Automatic initialization is fixed to YOLO first, with motion fallback when YOLO 
 Manual and explicitly enabled renderer_gt prompts bypass automatic detection. Renderer_gt eligibility and provenance are recorded explicitly.
 
 
-## Data flow and preserved outputs
+## Data flow and outputs
 
-1. Metadata supplies scene setup, physical targets and scale calibration. Task definitions restore omitted evaluator/method fields before the existing workflow; explicit legacy fields take precedence.
+1. Metadata supplies scene setup, physical targets and scale calibration. Task definitions restore omitted evaluator/method fields before evaluation; explicitly supplied fields take precedence.
 2. Initial prompts specify object ID, frame, foreground points and optional negative points/box.
 3. The tracker writes centers, boxes, areas, masks and initialization evidence.
 4. Formal evaluation records tracking gates, mask evidence, physical measurements and validity.
@@ -86,7 +86,7 @@ Formal masks are referenced from sam2_tracks to avoid duplicating every PNG.
 
 ## Testing
 
-The test suite covers the numeric estimators, fits, score formulas, validity statuses, rule fingerprints, output schemas, and organized/flat eval-only artifacts. SAM2 orchestration is tested using deterministic mocked inference; these checks verify orchestration and output contracts, not GPU model accuracy or performance. Run the suite with:
+The test suite covers the numeric estimators, fits, score formulas, validity statuses, mask-quality scoring, output schemas, and organized/flat eval-only artifacts. SAM2 orchestration is tested using deterministic mocked inference; these checks verify orchestration and output contracts, not GPU model accuracy or performance. Run the suite with:
 
 ```bash
 python -m pip install -r requirements-test.txt

@@ -49,11 +49,9 @@ def prepare_args(args: argparse.Namespace) -> argparse.Namespace:
     """Normalize and validate an explicit scorer configuration without parsing argv."""
     if args.penalty_multiplier is not None:
         args.weak_valid_multiplier = args.penalty_multiplier
-        if args.mask_policy == "penalty":
-            args.qc_flag_multiplier = args.penalty_multiplier
     if args.tau is not None and args.tau <= 0:
         raise ValueError("--tau must be positive")
-    for name in ("penalty_multiplier", "weak_valid_multiplier", "qc_flag_multiplier", "quality_flag_multiplier"):
+    for name in ("penalty_multiplier", "weak_valid_multiplier", "quality_flag_multiplier"):
         value = getattr(args, name)
         if value is not None and not (0.0 <= value <= 1.0):
             raise ValueError(f"--{name.replace('_', '-')} must be between 0 and 1")
@@ -140,54 +138,9 @@ def base_score(rel_error: float | None, tau: float) -> float | None:
     return float(100.0 * math.exp(-rel_error / tau))
 
 
-def mask_qc_status(result: dict[str, Any]) -> tuple[str, list[str], list[dict[str, Any]]]:
-    mask_qc = result.get("mask_qc") or {}
-    objects = mask_qc.get("objects") or []
-    reasons: list[str] = []
-    flagged = False
-    for item in objects:
-        decision = str(item.get("decision") or "")
-        reason = str(item.get("reasons") or "")
-        if decision and decision != "keep":
-            flagged = True
-        if reason:
-            reasons.extend(part for part in reason.split(";") if part)
-    if flagged or str(mask_qc.get("status") or "") == "flagged":
-        return "flagged", sorted(set(reasons)), objects
-    return "pass", [], objects
-
-
 def mask_quality(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    policy = "hard_fail" if args.strict_qc else args.mask_policy
-    if policy == "ignore":
-        _, qc_reasons, _ = mask_qc_status(result)
-        return {
-            "status": "pass",
-            "score": 1.0,
-            "reasons": qc_reasons,
-            "objects": [],
-        }
     config = getattr(args, "mask_config", None) or load_mask_config()
-    mask_info = compute_qmask(result.get("mask_qc") or {}, config)
-    qc_status, qc_reasons, objects = mask_qc_status(result)
-    if policy == "penalty":
-        score = 1.0 if qc_status == "pass" else float(args.qc_flag_multiplier)
-        return {
-            "status": "pass" if score >= 1.0 else ("weak" if score > 0 else "fail"),
-            "score": score,
-            "reasons": qc_reasons,
-            "objects": [],
-        }
-    if policy == "hard_fail":
-        score = 1.0 if qc_status == "pass" else 0.0
-        return {
-            "status": "pass" if score >= 1.0 else "fail",
-            "score": score,
-            "reasons": qc_reasons,
-            "objects": [],
-        }
-
-    return mask_info
+    return compute_qmask(result.get("mask_qc") or {}, config)
 
 
 def tracking_path_from_result(result: dict[str, Any], result_path: Path) -> Path | None:
@@ -676,7 +629,6 @@ def run(args: argparse.Namespace) -> None:
     summary.update(completeness)
     summary["n_score_available"] = sum(row["score_available"] for row in rows)
     summary["n_score_unavailable"] = 0
-    effective_mask_policy = "hard_fail" if args.strict_qc else args.mask_policy
     payload = {
         "model_name": args.model_name or result_root.name,
         "result_root": str(result_root),
@@ -701,15 +653,12 @@ def run(args: argparse.Namespace) -> None:
             "status_multipliers": status_multipliers_for_report(args),
             "penalty_multiplier": args.penalty_multiplier,
             "weak_valid_multiplier": args.weak_valid_multiplier,
-            "mask_policy": effective_mask_policy,
-            "qc_flag_multiplier": 0.0 if effective_mask_policy == "hard_fail" else args.qc_flag_multiplier,
             "mask_score_thresholds": args.mask_config["components"],
             "mask_score_gamma": args.mask_config["gamma"],
             "mask_aggregation": "minimum components, then minimum objects; flags do not raise component scores",
             "mask_missing_evidence": (
                 "ignore missing individual components; require nonempty object diagnostics and at least "
-                "one computable component per object; otherwise stop scoring without a default score. "
-                "The explicit mask-policy ignore ablation bypasses mask scoring"
+                "one computable component per object; otherwise stop scoring without a default score."
             ),
             "tracking_policy": args.tracking_policy,
             "quality_flag_multiplier": 0.0 if args.tracking_policy == "hard_fail" else args.quality_flag_multiplier,

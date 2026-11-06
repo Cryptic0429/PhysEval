@@ -12,13 +12,14 @@ def eval_acceleration(tracking_df, metadata_row):
         require_min_frames(track, 5)
         scale = require_scale(metadata_row, track)
         t = track["t"].to_numpy(float)
-        s, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "auto"), scale.scale_m_per_px)
-        a2, b, c, r2, _ = quadratic_fit(t, s)
+        q, axis_used = project_motion(track, str(metadata_row.get("Motion_Axis") or "auto"))
+        a2_px, b_px, c_px, r2, _ = quadratic_fit(t, q)
+        status, reason = status_from_r2(r2)
+        a2, b, c = (value * scale.scale_m_per_px for value in (a2_px, b_px, c_px))
         acc = 2.0 * a2
         target = numeric_target(metadata_row)
         if target is not None and target >= 0:
             acc = abs(acc)
-        status, reason = status_from_r2(r2)
         return done(
             metadata_row,
             acc,

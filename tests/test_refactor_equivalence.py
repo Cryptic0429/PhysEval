@@ -90,7 +90,6 @@ def test_scoring_rule_fingerprint():
 def _score_config():
     return SimpleNamespace(
         penalty_multiplier=None, weak_valid_multiplier=.8,
-        mask_policy="continuous", qc_flag_multiplier=.7, strict_qc=False,
         tracking_policy="hard_fail", quality_flag_multiplier=0.,
         min_motion_extent_ratio=.75, min_object_coverage=.5,
         recompute_tracking_quality=False, allow_contract_errors=False,

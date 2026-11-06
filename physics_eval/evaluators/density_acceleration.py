@@ -17,14 +17,14 @@ def eval_density_acceleration(tracking_df, metadata_row):
         n = max(6, min(len(track), len(track) // 3))
         sub = track.iloc[:n]
         t = sub["t"].to_numpy(float)
-        y_down = sub["cy_px"].to_numpy(float) * scale.scale_m_per_px
-        a2, b, c, r2, _ = quadratic_fit(t, y_down)
-        a_down = 2.0 * a2
+        y_down_px = sub["cy_px"].to_numpy(float)
+        a2_px, b_px, c_px, r2, _ = quadratic_fit(t, y_down_px)
+        status, reason = status_from_r2(r2)
+        a_down = 2.0 * a2_px * scale.scale_m_per_px
         denom = 1.0 - a_down / max(g, 1e-12)
         if abs(denom) <= 1e-9:
             raise ValueError("fit_failed")
         rho_s = rho_f / denom
-        status, reason = status_from_r2(r2)
         return done(
             metadata_row,
             rho_s,

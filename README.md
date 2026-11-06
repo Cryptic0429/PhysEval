@@ -68,7 +68,7 @@ The prompt and metadata files are included in [`benchmark/metadata/`](benchmark/
 | File | Contents |
 | --- | --- |
 | [`phys_t2v_bench_prompts.xlsx`](benchmark/metadata/phys_t2v_bench_prompts.xlsx) | Generation prompts in the `All_Prompts` sheet |
-| [`phys_t2v_bench_metadata.xlsx`](benchmark/metadata/phys_t2v_bench_metadata.xlsx) | Targets, units, evaluator settings, object counts, and calibration in the `metadata` sheet |
+| [`phys_t2v_bench_metadata.xlsx`](benchmark/metadata/phys_t2v_bench_metadata.xlsx) | Scene setup, physical targets, and scale calibration in the `metadata` sheet |
 | [`csv/`](benchmark/metadata/csv/) | UTF-8 exports of all workbook sheets |
 
 Each metric contains **50 samples**, for **500 samples** in total:
@@ -162,7 +162,7 @@ adjusted_score = physical_accuracy_score
 
 `tau` is a metric-specific error tolerance. Passing tracks have a tracking multiplier of `1`; estimation validity contributes `1` for `valid` or `0.8` for `weak_valid`.
 
-The **mask-quality score, Q_mask**, uses ten diagnostics (including normalized centroid step). Each component maps threshold-normalized degradation `p` to `1 - p^0.35`, and scores take the minimum across components and objects. Quality-control flags do not alter component scores. Missing individual components are ignored, while explicit diagnosed failures (such as insufficient valid middle frames) contribute zero. Scored videos must retain valid object-level diagnostics; if missing, scoring halts to prompt regeneration via `eval` rather than imputing default scores. Q_mask scales the adjusted score without changing effective eligibility.
+The **mask-quality score, Q_mask**, uses ten diagnostics (including normalized centroid step). Each component maps threshold-normalized degradation `p` to `1 - p^0.35`, and scores take the minimum across components and objects. Quality-control flags do not alter component scores. Missing individual components are ignored, while explicit diagnosed failures (such as insufficient valid middle frames) contribute zero. Scored videos must retain valid object-level diagnostics; if these are missing, scoring stops and prompts the user to rerun `eval`. Q_mask scales the adjusted score without changing effective eligibility.
 
 | Reported quantity | Interpretation |
 | --- | --- |
@@ -170,7 +170,7 @@ The **mask-quality score, Q_mask**, uses ten diagnostics (including normalized c
 | **Discard rate** | Fraction of videos that fail tracking quality, physics validity, or both. |
 | **End-to-end score** | Supplementary mean over all videos, assigning zero to discarded videos. |
 
-Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs are incomplete, an eligible physical estimate cannot be scored, or required object-level mask diagnostics are missing. The explicit `--mask-policy ignore` ablation bypasses mask scoring.
+Scores are aggregated per metric, and the overall model score gives each metric equal weight. Formal aggregation stops if benchmark IDs are incomplete, an eligible physical estimate cannot be scored, or required object-level mask diagnostics are missing.
 
 Reports are saved under `batch_eval_results/my_model/score_reports/all_metrics/`:
 
@@ -188,7 +188,7 @@ See the [scoring guide](SCORING_USAGE.md) for relative-error definitions, thresh
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--metadata` | Auto-discovery in `data/metadata/` | Pass the released workbook explicitly, as shown above. |
+| `--metadata` | Unique `data/metadata/*.xlsx` in a local workspace | Pass `benchmark/metadata/phys_t2v_bench_metadata.xlsx` explicitly for the released benchmark. |
 | `--prompt-id` | All rows | Evaluate one prompt for a smoke test. |
 | `--reuse-tracking` | Off | Reuse existing tracking JSON when available. |
 | `--eval-only` | Off | Estimate physics from existing tracking JSON. |
